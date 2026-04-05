@@ -1,0 +1,23 @@
+# Backend
+backend/noab-server
+backend/noab.db
+backend/uploads/
+backend/certs/
+backend/certs_bak/
+backend/cmd/
+
+# Frontend
+deputy-portal/node_modules/
+deputy-portal/dist/
+
+# OS
+.DS_Store
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+
+# Env
+.env

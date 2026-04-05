@@ -1,0 +1,202 @@
+-- منصة البحوث البرلمانية - مخطط قاعدة البيانات
+-- Parliamentary Research Portal - Database Schema
+
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+-- =============================================
+-- جدول الأقسام - Departments
+-- =============================================
+CREATE TABLE IF NOT EXISTS departments (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    head_name TEXT,
+    researcher_count INTEGER DEFAULT 0,
+    active_requests INTEGER DEFAULT 0,
+    color TEXT DEFAULT '#3b82f6',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- جدول المستخدمين - Users
+-- =============================================
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('deputy', 'manager', 'department_head', 'researcher', 'proofreader', 'admin')),
+    department_id TEXT REFERENCES departments(id),
+    deputy_id TEXT,
+    committee TEXT,
+    phone TEXT,
+    specialization TEXT,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended')),
+    last_login DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- جدول الصلاحيات - Permissions
+-- =============================================
+CREATE TABLE IF NOT EXISTS permissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    category TEXT
+);
+
+-- =============================================
+-- صلاحيات المستخدمين - User Permissions
+-- =============================================
+CREATE TABLE IF NOT EXISTS user_permissions (
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    permission_id INTEGER REFERENCES permissions(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, permission_id)
+);
+
+-- =============================================
+-- جدول الطلبات - Requests
+-- =============================================
+CREATE TABLE IF NOT EXISTS requests (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    deputy_id INTEGER REFERENCES users(id),
+    deputy_name TEXT,
+    committee TEXT,
+    purpose TEXT CHECK (purpose IN ('oversight', 'legislative', 'other')),
+    phone TEXT,
+    email TEXT,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'confirmed', 'in_progress', 'review', 'proofreading', 'completed', 'rejected')),
+    assigned_department TEXT REFERENCES departments(id),
+    date_received DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deadline DATETIME,
+    referral_date DATETIME,
+    completed_date DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- تأكيد الطلبات - Request Confirmations
+-- =============================================
+CREATE TABLE IF NOT EXISTS request_confirmations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT UNIQUE REFERENCES requests(id) ON DELETE CASCADE,
+    service_type TEXT CHECK (service_type IN ('دراسة', 'تقرير', 'ورقة إحاطة', 'بيان رأي', 'سؤال نيابي')),
+    classification TEXT CHECK (classification IN ('علمي', 'اجتماعي', 'سياسي', 'قانوني', 'مالية واقتصادية')),
+    completion_days INTEGER,
+    confirmed_by INTEGER REFERENCES users(id),
+    confirmed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- مهام البحث - Research Tasks
+-- =============================================
+CREATE TABLE IF NOT EXISTS research_tasks (
+    id TEXT PRIMARY KEY,
+    request_id TEXT REFERENCES requests(id) ON DELETE CASCADE,
+    researcher_id INTEGER REFERENCES users(id),
+    status TEXT DEFAULT 'assigned' CHECK (status IN ('assigned', 'in_progress', 'sent_to_proofreader', 'submitted', 'completed', 'returned')),
+    file_path TEXT,
+    date_assigned DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deadline DATETIME,
+    completion_days INTEGER,
+    submitted_date DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- طلبات المعلومات - Information Requests
+-- =============================================
+CREATE TABLE IF NOT EXISTS information_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    research_task_id TEXT REFERENCES research_tasks(id) ON DELETE CASCADE,
+    number TEXT NOT NULL,
+    target_entity TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'received')),
+    attached_file TEXT,
+    date_sent DATETIME DEFAULT CURRENT_TIMESTAMP,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- مهام التدقيق - Proofreading Tasks
+-- =============================================
+CREATE TABLE IF NOT EXISTS proofreading_tasks (
+    id TEXT PRIMARY KEY,
+    research_task_id TEXT REFERENCES research_tasks(id) ON DELETE CASCADE,
+    proofreader_id INTEGER REFERENCES users(id),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'returned')),
+    notes TEXT,
+    file_path TEXT,
+    assigned_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    completed_date DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- الملاحظات - Notes
+-- =============================================
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('request', 'research_task', 'proofreading_task')),
+    entity_id TEXT NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    user_name TEXT,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- سجل النشاطات - Activity Log
+-- =============================================
+CREATE TABLE IF NOT EXISTS activity_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id),
+    user_name TEXT,
+    action TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id TEXT,
+    details TEXT,
+    ip_address TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- الإشعارات - Notifications
+-- =============================================
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    type TEXT DEFAULT 'info' CHECK (type IN ('info', 'success', 'warning', 'error')),
+    is_read INTEGER DEFAULT 0,
+    entity_type TEXT,
+    entity_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- الفهارس - Indexes
+-- =============================================
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_department ON users(department_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
+CREATE INDEX IF NOT EXISTS idx_requests_deputy ON requests(deputy_id);
+CREATE INDEX IF NOT EXISTS idx_requests_department ON requests(assigned_department);
+CREATE INDEX IF NOT EXISTS idx_research_tasks_request ON research_tasks(request_id);
+CREATE INDEX IF NOT EXISTS idx_research_tasks_researcher ON research_tasks(researcher_id);
+CREATE INDEX IF NOT EXISTS idx_info_requests_task ON information_requests(research_task_id);
+CREATE INDEX IF NOT EXISTS idx_proofreading_tasks_research ON proofreading_tasks(research_task_id);
+CREATE INDEX IF NOT EXISTS idx_notes_entity ON notes(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
