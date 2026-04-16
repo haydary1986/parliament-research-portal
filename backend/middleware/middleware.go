@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -14,6 +15,15 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// ExtractIP يأخذ الـ IP فقط بدون port لضمان تتبّع محاولات الدخول عبر الاتصالات المتعددة
+func ExtractIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
+}
 
 type contextKey string
 
@@ -166,7 +176,7 @@ var (
 
 func RateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
+		ip := ExtractIP(r.RemoteAddr)
 		rateMu.Lock()
 		blockUntil, blocked := loginBlock[ip]
 		rateMu.Unlock()

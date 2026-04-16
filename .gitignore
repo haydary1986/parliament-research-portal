@@ -1,10 +1,17 @@
 # Backend
 backend/noab-server
 backend/noab.db
+backend/noab.db-shm
+backend/noab.db-wal
 backend/uploads/
 backend/certs/
 backend/certs_bak/
 backend/cmd/
+
+# Test artifacts
+.playwright-mcp/
+*.png
+DeputyPortal_v2*.jsx
 
 # Frontend
 deputy-portal/node_modules/

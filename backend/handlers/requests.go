@@ -23,7 +23,9 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT r.id, r.title, r.description, r.deputy_id, r.deputy_name,
 		r.committee, r.purpose, r.phone, r.email, r.status,
 		r.assigned_department, r.date_received, r.deadline,
-		r.referral_date, r.completed_date, r.created_at, r.updated_at
+		r.referral_date, r.completed_date, r.existing_research_id,
+		r.delivered_to_deputy_date, r.archived, r.archived_date,
+		r.final_review_by, r.final_review_date, r.created_at, r.updated_at
 		FROM requests r WHERE 1=1`
 	countQuery := "SELECT COUNT(*) FROM requests r WHERE 1=1"
 	var args []interface{}
@@ -75,7 +77,10 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 			&req.ID, &req.Title, &req.Description, &req.DeputyID, &req.DeputyName,
 			&req.Committee, &req.Purpose, &req.Phone, &req.Email, &req.Status,
 			&req.AssignedDepartment, &req.DateReceived, &req.Deadline,
-			&req.ReferralDate, &req.CompletedDate, &req.CreatedAt, &req.UpdatedAt,
+			&req.ReferralDate, &req.CompletedDate,
+			&req.ExistingResearchID, &req.DeliveredToDeputyDate,
+			&req.Archived, &req.ArchivedDate, &req.FinalReviewBy, &req.FinalReviewDate,
+			&req.CreatedAt, &req.UpdatedAt,
 		)
 		if err != nil {
 			continue
@@ -98,13 +103,18 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 	err := db.DB.QueryRow(`
 		SELECT id, title, description, deputy_id, deputy_name, committee, purpose,
 		       phone, email, status, assigned_department, date_received, deadline,
-		       referral_date, completed_date, created_at, updated_at
+		       referral_date, completed_date, existing_research_id, delivered_to_deputy_date,
+		       archived, archived_date, final_review_by, final_review_date,
+		       created_at, updated_at
 		FROM requests WHERE id = ?
 	`, id).Scan(
 		&req.ID, &req.Title, &req.Description, &req.DeputyID, &req.DeputyName,
 		&req.Committee, &req.Purpose, &req.Phone, &req.Email, &req.Status,
 		&req.AssignedDepartment, &req.DateReceived, &req.Deadline,
-		&req.ReferralDate, &req.CompletedDate, &req.CreatedAt, &req.UpdatedAt,
+		&req.ReferralDate, &req.CompletedDate,
+		&req.ExistingResearchID, &req.DeliveredToDeputyDate,
+		&req.Archived, &req.ArchivedDate, &req.FinalReviewBy, &req.FinalReviewDate,
+		&req.CreatedAt, &req.UpdatedAt,
 	)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, models.APIResponse{
@@ -384,4 +394,89 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Message: "تم تأكيد الطلب وتعيين الباحث بنجاح",
 	})
+}
+
+// PUT /api/requests/{id}/final-review - مراجعة نهائية من مدير الدائرة بعد التدقيق
+func FinalReviewRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	var input struct {
+		Decision string `json:"decision"` // "approve" | "reject"
+		Notes    string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
+		return
+	}
+	if input.Decision != "approve" && input.Decision != "reject" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "القرار يجب أن يكون approve أو reject"})
+		return
+	}
+
+	var currentStatus string
+	db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&currentStatus)
+	if currentStatus != "under_manager_review" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الطلب ليس في مرحلة المراجعة النهائية"})
+		return
+	}
+
+	now := time.Now()
+	var userName string
+	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
+
+	if input.Decision == "approve" {
+		// اعتماد نهائي: تسليم للنائب + انتظار موافقة الباحث على الأرشفة
+		db.DB.Exec(`
+			UPDATE requests SET status = 'delivered', completed_date = ?,
+			       delivered_to_deputy_date = ?, final_review_by = ?, final_review_date = ?, updated_at = ?
+			WHERE id = ?
+		`, now, now, userID, now, now, id)
+
+		// إشعار النائب بتسليم البحث
+		var deputyID int
+		db.DB.QueryRow("SELECT deputy_id FROM requests WHERE id = ?", id).Scan(&deputyID)
+		if deputyID > 0 {
+			createNotification(deputyID, "تم تسليم البحث",
+				fmt.Sprintf("تم الانتهاء من بحث طلبك %s وتسليم نسخة إليك", id),
+				"success", strPtr("request"), &id)
+		}
+
+		// إشعار الباحث لأخذ موافقته على الأرشفة
+		var rtID string
+		var researcherID int
+		db.DB.QueryRow("SELECT id, researcher_id FROM research_tasks WHERE request_id = ?", id).Scan(&rtID, &researcherID)
+		if researcherID > 0 {
+			createNotification(researcherID, "يرجى الموافقة على الأرشفة",
+				fmt.Sprintf("تم اعتماد بحثك. يرجى تحديد موافقتك على إرسال نسخة للمستودع الرقمي (مهمة %s)", rtID),
+				"info", strPtr("research_task"), &rtID)
+		}
+
+		logActivity(userID, userName, "final_approve", strPtr("request"), &id, "اعتماد نهائي وتسليم للنائب")
+		writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم الاعتماد النهائي وتسليم البحث للنائب"})
+		return
+	}
+
+	// رفض: إعادة للباحث
+	db.DB.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?", now, id)
+	var rtID string
+	var researcherID int
+	db.DB.QueryRow("SELECT id, researcher_id FROM research_tasks WHERE request_id = ?", id).Scan(&rtID, &researcherID)
+	db.DB.Exec("UPDATE research_tasks SET status = 'in_progress', updated_at = ? WHERE id = ?", now, rtID)
+
+	note := input.Notes
+	if note == "" {
+		note = "رفض المراجعة النهائية - يرجى المراجعة والتعديل"
+	}
+	db.DB.Exec(`INSERT INTO notes (entity_type, entity_id, user_id, user_name, content) VALUES ('request', ?, ?, ?, ?)`,
+		id, userID, userName, note)
+
+	if researcherID > 0 {
+		createNotification(researcherID, "رجوع البحث للمراجعة",
+			fmt.Sprintf("تم رفض المراجعة النهائية للطلب %s: %s", id, note),
+			"warning", strPtr("research_task"), &rtID)
+	}
+
+	logActivity(userID, userName, "final_reject", strPtr("request"), &id, "رفض المراجعة النهائية - إرجاع للباحث")
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم إرجاع البحث للباحث"})
 }

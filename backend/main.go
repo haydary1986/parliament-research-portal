@@ -64,6 +64,8 @@ func main() {
 	mux.Handle("PUT /api/requests/{id}/confirm", role("department_head")(http.HandlerFunc(handlers.ConfirmRequest)))
 	// إرجاع الطلب (بحث موجود): المدير فقط
 	mux.Handle("PUT /api/requests/{id}/return", role("manager")(http.HandlerFunc(handlers.ReturnRequest)))
+	// المراجعة النهائية واعتماد البحث: المدير فقط
+	mux.Handle("PUT /api/requests/{id}/final-review", role("manager")(http.HandlerFunc(handlers.FinalReviewRequest)))
 
 	// =============================================
 	// المستخدمين - Users
@@ -89,6 +91,10 @@ func main() {
 	mux.Handle("GET /api/research-tasks/{id}", role("researcher", "department_head", "manager", "admin")(http.HandlerFunc(handlers.GetResearchTask)))
 	mux.Handle("PUT /api/research-tasks/{id}/status", role("researcher", "department_head")(http.HandlerFunc(handlers.UpdateResearchTaskStatus)))
 	mux.Handle("POST /api/research-tasks/{id}/info-requests", role("researcher")(http.HandlerFunc(handlers.CreateInfoRequest)))
+	// تحديث رد الجهة على كتاب المعلومات
+	mux.Handle("PUT /api/information-requests/{id}/response", role("researcher")(http.HandlerFunc(handlers.UpdateInfoRequestResponse)))
+	// موافقة الباحث على إرسال البحث للمستودع الرقمي
+	mux.Handle("PUT /api/research-tasks/{id}/archive-consent", role("researcher")(http.HandlerFunc(handlers.UpdateArchiveConsent)))
 
 	// =============================================
 	// التدقيق - Proofreading

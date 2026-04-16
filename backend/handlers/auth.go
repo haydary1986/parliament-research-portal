@@ -54,7 +54,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	// التحقق من كلمة المرور عبر bcrypt فقط
 	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(input.Password))
 	if err != nil {
-		middleware.RecordLoginAttempt(r.RemoteAddr, false)
+		middleware.RecordLoginAttempt(middleware.ExtractIP(r.RemoteAddr), false)
 		writeJSON(w, http.StatusUnauthorized, models.APIResponse{
 			Success: false, Message: "بيانات الدخول غير صحيحة",
 		})

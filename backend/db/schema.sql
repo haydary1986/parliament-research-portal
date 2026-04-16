@@ -69,12 +69,18 @@ CREATE TABLE IF NOT EXISTS requests (
     purpose TEXT CHECK (purpose IN ('oversight', 'legislative', 'other')),
     phone TEXT,
     email TEXT,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'confirmed', 'in_progress', 'review', 'proofreading', 'completed', 'rejected')),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'confirmed', 'in_progress', 'review', 'proofreading', 'under_manager_review', 'delivered', 'completed', 'returned_exists', 'rejected')),
     assigned_department TEXT REFERENCES departments(id),
     date_received DATETIME DEFAULT CURRENT_TIMESTAMP,
     deadline DATETIME,
     referral_date DATETIME,
     completed_date DATETIME,
+    existing_research_id TEXT,
+    delivered_to_deputy_date DATETIME,
+    archived INTEGER DEFAULT 0,
+    archived_date DATETIME,
+    final_review_by INTEGER REFERENCES users(id),
+    final_review_date DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -105,6 +111,9 @@ CREATE TABLE IF NOT EXISTS research_tasks (
     deadline DATETIME,
     completion_days INTEGER,
     submitted_date DATETIME,
+    archive_consent TEXT CHECK (archive_consent IN ('approved', 'rejected')),
+    archive_consent_date DATETIME,
+    archive_consent_notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -118,9 +127,12 @@ CREATE TABLE IF NOT EXISTS information_requests (
     number TEXT NOT NULL,
     target_entity TEXT NOT NULL,
     subject TEXT NOT NULL,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'received')),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'received', 'no_response')),
     attached_file TEXT,
     date_sent DATETIME DEFAULT CURRENT_TIMESTAMP,
+    attempt_number INTEGER DEFAULT 1,
+    response_letter_number TEXT,
+    response_date DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

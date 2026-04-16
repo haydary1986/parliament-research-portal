@@ -106,14 +106,26 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 			WHERE id = ?
 		`, input.Status, input.Notes, now, now, id)
 
-		// تحديث مهمة البحث والطلب
+		// بعد التدقيق: البحث يعود للباحث كجاهز، والطلب يذهب لمراجعة مدير الدائرة
 		var rtID string
 		db.DB.QueryRow("SELECT research_task_id FROM proofreading_tasks WHERE id = ?", id).Scan(&rtID)
-		db.DB.Exec("UPDATE research_tasks SET status = 'completed', updated_at = ? WHERE id = ?", now, rtID)
+		db.DB.Exec("UPDATE research_tasks SET status = 'submitted', updated_at = ? WHERE id = ?", now, rtID)
 
 		var reqID string
 		db.DB.QueryRow("SELECT request_id FROM research_tasks WHERE id = ?", rtID).Scan(&reqID)
-		db.DB.Exec("UPDATE requests SET status = 'completed', completed_date = ?, updated_at = ? WHERE id = ?", now, now, reqID)
+		db.DB.Exec("UPDATE requests SET status = 'under_manager_review', updated_at = ? WHERE id = ?", now, reqID)
+
+		// إشعار مدير الدائرة للمراجعة النهائية
+		rows, _ := db.DB.Query("SELECT id FROM users WHERE role = 'manager' AND status = 'active'")
+		defer rows.Close()
+		for rows.Next() {
+			var mgrID int
+			if rows.Scan(&mgrID) == nil {
+				createNotification(mgrID, "بحث بانتظار المراجعة النهائية",
+					fmt.Sprintf("تم إتمام تدقيق البحث للطلب %s. يرجى المراجعة والاعتماد النهائي.", reqID),
+					"info", strPtr("request"), &reqID)
+			}
+		}
 	} else if input.Status == "returned" {
 		db.DB.Exec(`
 			UPDATE proofreading_tasks SET status = ?, notes = ?, updated_at = ? WHERE id = ?

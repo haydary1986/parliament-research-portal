@@ -54,6 +54,12 @@ type Request struct {
 	Deadline           *time.Time          `json:"deadline"`
 	ReferralDate       *time.Time          `json:"referral_date"`
 	CompletedDate      *time.Time          `json:"completed_date"`
+	ExistingResearchID *string             `json:"existing_research_id"`
+	DeliveredToDeputyDate *time.Time       `json:"delivered_to_deputy_date"`
+	Archived           int                 `json:"archived"`
+	ArchivedDate       *time.Time          `json:"archived_date"`
+	FinalReviewBy      *int                `json:"final_review_by"`
+	FinalReviewDate    *time.Time          `json:"final_review_date"`
 	CreatedAt          time.Time           `json:"created_at"`
 	UpdatedAt          time.Time           `json:"updated_at"`
 	Confirmation       *RequestConfirmation `json:"confirmation,omitempty"`
@@ -86,6 +92,9 @@ type ResearchTask struct {
 	Deadline            *time.Time           `json:"deadline"`
 	CompletionDays      *int                 `json:"completion_days"`
 	SubmittedDate       *time.Time           `json:"submitted_date"`
+	ArchiveConsent      *string              `json:"archive_consent"`
+	ArchiveConsentDate  *time.Time           `json:"archive_consent_date"`
+	ArchiveConsentNotes *string              `json:"archive_consent_notes"`
 	CreatedAt           time.Time            `json:"created_at"`
 	UpdatedAt           time.Time            `json:"updated_at"`
 	InformationRequests []InformationRequest `json:"information_requests,omitempty"`
@@ -96,14 +105,17 @@ type ResearchTask struct {
 // طلب معلومات - Information Request
 // =============================================
 type InformationRequest struct {
-	ID             int       `json:"id"`
-	ResearchTaskID string    `json:"research_task_id"`
-	Number         string    `json:"number"`
-	TargetEntity   string    `json:"target_entity"`
-	Subject        string    `json:"subject"`
-	Status         string    `json:"status"`
-	AttachedFile   *string   `json:"attached_file"`
-	DateSent       time.Time `json:"date_sent"`
+	ID                   int        `json:"id"`
+	ResearchTaskID       string     `json:"research_task_id"`
+	Number               string     `json:"number"`
+	TargetEntity         string     `json:"target_entity"`
+	Subject              string     `json:"subject"`
+	Status               string     `json:"status"`
+	AttachedFile         *string    `json:"attached_file"`
+	DateSent             time.Time  `json:"date_sent"`
+	AttemptNumber        int        `json:"attempt_number"`
+	ResponseLetterNumber *string    `json:"response_letter_number"`
+	ResponseDate         *time.Time `json:"response_date"`
 }
 
 // =============================================

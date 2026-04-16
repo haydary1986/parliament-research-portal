@@ -18,7 +18,8 @@ func GetResearchTasks(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT rt.id, rt.request_id, rt.researcher_id, rt.status,
 		rt.file_path, rt.date_assigned, rt.deadline, rt.completion_days,
-		rt.submitted_date, rt.created_at, rt.updated_at
+		rt.submitted_date, rt.archive_consent, rt.archive_consent_date,
+		rt.archive_consent_notes, rt.created_at, rt.updated_at
 		FROM research_tasks rt WHERE 1=1`
 	var args []interface{}
 
@@ -59,7 +60,8 @@ func GetResearchTasks(w http.ResponseWriter, r *http.Request) {
 		var t ResearchTaskWithDetails
 		err := rows.Scan(&t.ID, &t.RequestID, &t.ResearcherID, &t.Status,
 			&t.FilePath, &t.DateAssigned, &t.Deadline, &t.CompletionDays,
-			&t.SubmittedDate, &t.CreatedAt, &t.UpdatedAt)
+			&t.SubmittedDate, &t.ArchiveConsent, &t.ArchiveConsentDate,
+			&t.ArchiveConsentNotes, &t.CreatedAt, &t.UpdatedAt)
 		if err != nil {
 			continue
 		}
@@ -80,11 +82,14 @@ func GetResearchTask(w http.ResponseWriter, r *http.Request) {
 	var t models.ResearchTask
 	err := db.DB.QueryRow(`
 		SELECT id, request_id, researcher_id, status, file_path, date_assigned,
-		       deadline, completion_days, submitted_date, created_at, updated_at
+		       deadline, completion_days, submitted_date,
+		       archive_consent, archive_consent_date, archive_consent_notes,
+		       created_at, updated_at
 		FROM research_tasks WHERE id = ?
 	`, id).Scan(&t.ID, &t.RequestID, &t.ResearcherID, &t.Status,
 		&t.FilePath, &t.DateAssigned, &t.Deadline, &t.CompletionDays,
-		&t.SubmittedDate, &t.CreatedAt, &t.UpdatedAt)
+		&t.SubmittedDate, &t.ArchiveConsent, &t.ArchiveConsentDate,
+		&t.ArchiveConsentNotes, &t.CreatedAt, &t.UpdatedAt)
 
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, models.APIResponse{
@@ -110,7 +115,8 @@ func GetResearchTask(w http.ResponseWriter, r *http.Request) {
 
 	// جلب طلبات المعلومات
 	infoRows, _ := db.DB.Query(`
-		SELECT id, research_task_id, number, target_entity, subject, status, attached_file, date_sent
+		SELECT id, research_task_id, number, target_entity, subject, status, attached_file, date_sent,
+		       attempt_number, response_letter_number, response_date
 		FROM information_requests WHERE research_task_id = ? ORDER BY date_sent
 	`, id)
 	if infoRows != nil {
@@ -118,7 +124,8 @@ func GetResearchTask(w http.ResponseWriter, r *http.Request) {
 		for infoRows.Next() {
 			var ir models.InformationRequest
 			if infoRows.Scan(&ir.ID, &ir.ResearchTaskID, &ir.Number, &ir.TargetEntity,
-				&ir.Subject, &ir.Status, &ir.AttachedFile, &ir.DateSent) == nil {
+				&ir.Subject, &ir.Status, &ir.AttachedFile, &ir.DateSent,
+				&ir.AttemptNumber, &ir.ResponseLetterNumber, &ir.ResponseDate) == nil {
 				t.InformationRequests = append(t.InformationRequests, ir)
 			}
 		}
@@ -237,11 +244,12 @@ func CreateInfoRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	number := generateID("INF")
+	attempt := count + 1
 
 	_, err := db.DB.Exec(`
-		INSERT INTO information_requests (research_task_id, number, target_entity, subject, status, date_sent)
-		VALUES (?, ?, ?, ?, 'pending', ?)
-	`, taskID, number, input.TargetEntity, input.Subject, time.Now())
+		INSERT INTO information_requests (research_task_id, number, target_entity, subject, status, date_sent, attempt_number)
+		VALUES (?, ?, ?, ?, 'sent', ?, ?)
+	`, taskID, number, input.TargetEntity, input.Subject, time.Now(), attempt)
 
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{
@@ -253,9 +261,122 @@ func CreateInfoRequest(w http.ResponseWriter, r *http.Request) {
 	var userName string
 	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
 	logActivity(userID, userName, "create_info_request", strPtr("research_task"), &taskID,
-		fmt.Sprintf("إنشاء طلب معلومات إلى %s", input.TargetEntity))
+		fmt.Sprintf("إنشاء طلب معلومات (محاولة %d/3) إلى %s", attempt, input.TargetEntity))
 
 	writeJSON(w, http.StatusCreated, models.APIResponse{
-		Success: true, Message: "تم إنشاء طلب المعلومات بنجاح",
+		Success: true, Message: fmt.Sprintf("تم إنشاء طلب المعلومات (المحاولة %d من 3)", attempt),
+		Data: map[string]interface{}{"attempt_number": attempt, "number": number},
 	})
+}
+
+// PUT /api/information-requests/{id}/response - تحديث رد الجهة
+func UpdateInfoRequestResponse(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	// تحقق الملكية: الباحث المسؤول عن المهمة
+	var taskID string
+	var assignedResearcher int
+	db.DB.QueryRow(`
+		SELECT ir.research_task_id, rt.researcher_id
+		FROM information_requests ir
+		JOIN research_tasks rt ON rt.id = ir.research_task_id
+		WHERE ir.id = ?
+	`, id).Scan(&taskID, &assignedResearcher)
+	if assignedResearcher != userID {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بتعديل هذا الطلب"})
+		return
+	}
+
+	var input struct {
+		Status               string `json:"status"` // "received" | "no_response"
+		ResponseLetterNumber string `json:"response_letter_number"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
+		return
+	}
+	if input.Status != "received" && input.Status != "no_response" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الحالة يجب أن تكون received أو no_response"})
+		return
+	}
+	if input.Status == "received" && input.ResponseLetterNumber == "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "يجب إدخال رقم كتاب الرد"})
+		return
+	}
+
+	now := time.Now()
+	if input.Status == "received" {
+		db.DB.Exec(`UPDATE information_requests SET status = ?, response_letter_number = ?, response_date = ? WHERE id = ?`,
+			input.Status, input.ResponseLetterNumber, now, id)
+	} else {
+		db.DB.Exec(`UPDATE information_requests SET status = ?, response_date = ? WHERE id = ?`,
+			input.Status, now, id)
+	}
+
+	var userName string
+	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
+	details := fmt.Sprintf("تحديث رد الجهة: %s", input.Status)
+	if input.Status == "received" {
+		details = fmt.Sprintf("وصل رد الجهة - رقم الكتاب: %s", input.ResponseLetterNumber)
+	}
+	logActivity(userID, userName, "update_info_response", strPtr("research_task"), &taskID, details)
+
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم تحديث حالة الرد"})
+}
+
+// PUT /api/research-tasks/{id}/archive-consent - موافقة الباحث على الأرشفة
+func UpdateArchiveConsent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	// تحقق الملكية
+	var assignedResearcher int
+	var requestID string
+	db.DB.QueryRow("SELECT researcher_id, request_id FROM research_tasks WHERE id = ?", id).Scan(&assignedResearcher, &requestID)
+	if assignedResearcher != userID {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بتعديل هذه المهمة"})
+		return
+	}
+
+	// تأكد الطلب في مرحلة التسليم (المدير اعتمده)
+	var reqStatus string
+	db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", requestID).Scan(&reqStatus)
+	if reqStatus != "delivered" && reqStatus != "completed" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الطلب ليس جاهزاً للأرشفة بعد"})
+		return
+	}
+
+	var input struct {
+		Consent string `json:"consent"` // "approved" | "rejected"
+		Notes   string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
+		return
+	}
+	if input.Consent != "approved" && input.Consent != "rejected" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "القرار يجب أن يكون approved أو rejected"})
+		return
+	}
+
+	now := time.Now()
+	db.DB.Exec(`UPDATE research_tasks SET archive_consent = ?, archive_consent_date = ?, archive_consent_notes = ?, status = 'completed', updated_at = ? WHERE id = ?`,
+		input.Consent, now, input.Notes, now, id)
+
+	if input.Consent == "approved" {
+		db.DB.Exec(`UPDATE requests SET archived = 1, archived_date = ?, status = 'completed', updated_at = ? WHERE id = ?`, now, now, requestID)
+	} else {
+		db.DB.Exec(`UPDATE requests SET archived = 0, status = 'completed', updated_at = ? WHERE id = ?`, now, requestID)
+	}
+
+	var userName string
+	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
+	details := "رفض إرسال البحث للمستودع الرقمي"
+	if input.Consent == "approved" {
+		details = "موافقة على إرسال البحث للمستودع الرقمي"
+	}
+	logActivity(userID, userName, "archive_consent", strPtr("research_task"), &id, details)
+
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم تسجيل قرارك بشأن الأرشفة"})
 }
