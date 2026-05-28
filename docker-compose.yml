@@ -39,6 +39,9 @@ services:
       - coolify
     labels:
       - "traefik.docker.network=coolify"
+      # explicit service port - Coolify auto-labels don't include this
+      - "traefik.http.services.https-0-mgfsxzp9um0jyy835jm8vf5g-frontend.loadbalancer.server.port=80"
+      - "traefik.http.services.http-0-mgfsxzp9um0jyy835jm8vf5g-frontend.loadbalancer.server.port=80"
     depends_on:
       - backend
 
