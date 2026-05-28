@@ -4,7 +4,7 @@
 FROM golang:1.25-alpine AS builder
 
 # gcc + musl-dev مطلوبان لـ CGO الذي يحتاجه go-sqlite3
-RUN apk add --no-cache gcc musl-dev sqlite-dev
+RUN apk add --no-cache gcc musl-dev
 
 WORKDIR /build
 
@@ -16,10 +16,8 @@ RUN go mod download
 COPY . .
 
 # البناء مع CGO_ENABLED=1 (مطلوب لـ go-sqlite3)
-# -ldflags='-s -w' لتقليل حجم الباينري
-# -trimpath لإزالة المسارات المطلقة من stack traces
 RUN CGO_ENABLED=1 GOOS=linux \
-    go build -trimpath -ldflags='-s -w -extldflags "-static"' \
+    go build -trimpath -ldflags='-s -w' \
     -o /noab-server .
 
 # =========================================
@@ -27,20 +25,17 @@ RUN CGO_ENABLED=1 GOOS=linux \
 # =========================================
 FROM alpine:3.20
 
-# ca-certificates للـ HTTPS outbound requests (إن لزم)
-# tzdata لدعم المنطقة الزمنية
-RUN apk add --no-cache ca-certificates tzdata && \
-    addgroup -S noab && adduser -S noab -G noab
+# ca-certificates + tzdata + wget للـ healthcheck
+RUN apk add --no-cache ca-certificates tzdata wget sqlite-libs
 
 WORKDIR /app
 
-# نسخ الباينري فقط
+# نسخ الباينري
 COPY --from=builder /noab-server /app/noab-server
 
 # إنشاء مجلدات البيانات والملفات المرفوعة
-# هذه المجلدات ستكون mount points للـ volumes الخارجية
-RUN mkdir -p /app/data /app/uploads && \
-    chown -R noab:noab /app
+# سيتم mount عليها volumes خارجية من docker-compose
+RUN mkdir -p /app/data /app/uploads && chmod 755 /app/data /app/uploads
 
 # 🔒 عزل قاعدة البيانات والملفات
 # DB_PATH يشير لداخل volume خارجي → البيانات تنجو من إعادة البناء
@@ -48,16 +43,10 @@ ENV DB_PATH=/app/data/noab.db \
     PORT=8080 \
     GO_ENV=production
 
-# Volumes للبيانات المُستدامة (يجب أن تكون mount points حقيقية في الإنتاج)
-VOLUME ["/app/data", "/app/uploads"]
-
-# تشغيل كمستخدم non-root
-USER noab
-
 EXPOSE 8080
 
 # Health check - endpoint مخصص بدون auth
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget --quiet --tries=1 --output-document=- http://localhost:8080/api/healthz | grep -q '"ok"' || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
+    CMD wget --quiet --tries=1 --output-document=- http://localhost:8080/api/healthz 2>&1 | grep -q 'ok' || exit 1
 
 ENTRYPOINT ["/app/noab-server"]
