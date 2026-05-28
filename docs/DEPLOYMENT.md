@@ -259,6 +259,45 @@ NO_SEED=true
 
 ## 🚨 استكشاف الأخطاء
 
+### المشكلة: 503 "no available server" من Traefik
+
+عند نشر docker-compose على Coolify ومع ضبط custom domain، قد يحدث:
+- التطبيق يبني (build) بنجاح ✓
+- الـ containers تعمل ✓
+- لكن `https://your-domain.com` يُرجع `503 no available server`
+
+**السبب**: Traefik لا يستطيع الوصول للـ frontend container — مشكلة routing.
+
+**الحلول الموصى بها (بالترتيب)**:
+
+1. **تأكد من الشبكة `coolify`** في docker-compose:
+   ```yaml
+   services:
+     frontend:
+       networks:
+         - coolify
+       labels:
+         - "traefik.docker.network=coolify"
+   networks:
+     coolify:
+       external: true
+   ```
+
+2. **أعد تشغيل Coolify proxy من الـ Dashboard**:
+   - ادخل: `Settings → Proxy → Restart`
+
+3. **افحص Traefik dashboard**:
+   - `https://docker.erticaz.com/proxy/status`
+   - تأكد من ظهور router للدومين
+
+4. **حذف وإعادة إنشاء التطبيق** (إذا كل ما سبق فشل):
+   - Coolify قد يخزن config قديم في cache
+   - حذف يدوي عبر UI ثم إنشاء جديد
+
+5. **بديل**: استخدم Dockerfile build pack بدلاً من docker-compose:
+   - أبسط للـ routing
+   - لكن يحتاج تطبيقين منفصلين (backend + frontend)
+
 ### المشكلة: "JWT_SECRET is required"
 
 **الحل**: عيّن `JWT_SECRET` في `.env` أو في Coolify env vars.
