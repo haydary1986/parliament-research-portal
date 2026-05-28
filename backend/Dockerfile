@@ -45,8 +45,4 @@ ENV DB_PATH=/app/data/noab.db \
 
 EXPOSE 8080
 
-# Health check - endpoint مخصص بدون auth
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
-    CMD wget --quiet --tries=1 --output-document=- http://localhost:8080/api/healthz 2>&1 | grep -q 'ok' || exit 1
-
 ENTRYPOINT ["/app/noab-server"]

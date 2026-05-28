@@ -50,13 +50,6 @@ services:
     networks:
       - noab-internal
 
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/security/stats"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-
     deploy:
       resources:
         limits:
@@ -84,18 +77,10 @@ services:
       - "${FRONTEND_PORT:-3000}:80"
 
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
 
     networks:
       - noab-internal
-
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/healthz"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
 
     deploy:
       resources:
