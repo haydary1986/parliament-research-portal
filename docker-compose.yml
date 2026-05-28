@@ -1,116 +1,43 @@
 # =====================================================
-# Parliament Research Portal - Docker Compose
+# Parliament Research Portal - Coolify-ready Compose
 # =====================================================
-# مُجهَّز للنشر على Coolify مع عزل كامل لقاعدة البيانات
+# تكوين بسيط يدع Coolify يضيف Traefik labels + networks تلقائياً
+# عبر docker_compose_domains
 #
-# 🔒 ملاحظة مهمة عن عزل البيانات:
-# - الـ volumes "noab_db_data" و "noab_uploads" مُعرَّفة كـ named volumes
-# - Docker يحتفظ بها مستقلة عن دورة حياة الـ containers
-# - عند rebuild/redeploy: البيانات تبقى كما هي ✓
-# - عند docker compose down: البيانات تبقى ✓
-# - فقط `docker volume rm noab_db_data` يحذفها (إجراء يدوي صريح)
+# 🔒 عزل البيانات: Coolify يحفظ volumes (NAMED) بين الـ deployments
 # =====================================================
 
 services:
-  # =====================================================
-  # Backend: Go API + SQLite
-  # =====================================================
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: noab-backend:latest
     restart: unless-stopped
-
     environment:
-      # 🔐 مطلوبة - مفتاح JWT (32 حرف على الأقل)
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required and must be at least 32 chars}
-      # وضع الإنتاج - يجبر التحقق من JWT_SECRET ويفعّل سياسات صارمة
-      GO_ENV: ${GO_ENV:-production}
-      # دومين الـ Frontend المسموح به في CORS
-      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
-      # مسار قاعدة البيانات - يشير لداخل volume خارجي (حماية البيانات)
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be at least 32 chars}
+      GO_ENV: production
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN}
       DB_PATH: /app/data/noab.db
-      # تعطيل seed إذا كانت البيانات موجودة (idempotent بشكل افتراضي)
       NO_SEED: ${NO_SEED:-false}
       PORT: "8080"
-
     volumes:
-      # 🔒 عزل قاعدة البيانات - النقطة الأهم
-      # named volume "noab_db_data" مستقل عن image
-      - noab_db_data:/app/data
-      # 🔒 عزل الملفات المرفوعة
-      - noab_uploads:/app/uploads
-
-    # لا تكشف port للخارج - frontend يصل عبر شبكة Docker
+      - noab-db-data:/app/data
+      - noab-uploads:/app/uploads
     expose:
       - "8080"
 
-    # نفس شبكة Coolify لـ frontend يستطيع الوصول
-    networks:
-      - coolify
-
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-        reservations:
-          memory: 64M
-
-  # =====================================================
-  # Frontend: React + Nginx
-  # =====================================================
   frontend:
     build:
       context: ./deputy-portal
       dockerfile: Dockerfile
       args:
-        # فارغ يعني: استخدم نفس الـ origin + /api (proxy_pass في nginx يعالجه)
         VITE_API_BASE: ""
-    image: noab-frontend:latest
     restart: unless-stopped
-
     expose:
       - "80"
-
-    # Coolify يضيف Traefik labels تلقائياً عبر docker_compose_domains
-    networks:
-      - coolify
-
-    # نخبر Traefik أي شبكة وأي port للوصول للحاوية
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=coolify"
-      - "traefik.http.services.parliament-research-portal-frontend.loadbalancer.server.port=80"
-
     depends_on:
       - backend
 
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-        reservations:
-          memory: 32M
-
-# =====================================================
-# Networks
-# =====================================================
-networks:
-  # شبكة Coolify الرئيسية حيث يعمل Traefik proxy
-  coolify:
-    external: true
-
-# =====================================================
-# 🔒 Volumes - عزل البيانات الحرجة
-# =====================================================
 volumes:
-  # قاعدة البيانات SQLite — تنجو من أي rebuild/redeploy
-  noab_db_data:
-    driver: local
-    name: noab_db_data
-
-  # الملفات المرفوعة (PDF, DOC, DOCX) — تنجو من أي rebuild/redeploy
-  noab_uploads:
-    driver: local
-    name: noab_uploads
+  noab-db-data:
+  noab-uploads:
