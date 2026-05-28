@@ -20,7 +20,6 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     image: noab-backend:latest
-    container_name: noab-backend
     restart: unless-stopped
 
     environment:
@@ -68,13 +67,12 @@ services:
         # فارغ يعني: استخدم نفس الـ origin + /api (proxy_pass في nginx يعالجه)
         VITE_API_BASE: ""
     image: noab-frontend:latest
-    container_name: noab-frontend
     restart: unless-stopped
 
-    # Coolify سيتكفل بتعيين port خارجي تلقائياً عبر Traefik
-    # في الـ local: نكشف 3000
-    ports:
-      - "${FRONTEND_PORT:-3000}:80"
+    # Coolify يكتشف SERVICE_FQDN_FRONTEND ويوجِّه Traefik
+    # في الـ local: استخدم profile للـ ports
+    expose:
+      - "80"
 
     depends_on:
       - backend
