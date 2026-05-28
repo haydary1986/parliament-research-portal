@@ -70,6 +70,10 @@ services:
       - "80"
 
     # Coolify يضيف Traefik labels تلقائياً عبر docker_compose_domains
+    # Traefik يعمل على شبكة coolify الخارجية ⇒ نضيف الـ frontend إليها للوصول
+    networks:
+      - default
+      - coolify
 
     depends_on:
       - backend
@@ -80,6 +84,14 @@ services:
           memory: 128M
         reservations:
           memory: 32M
+
+# =====================================================
+# Networks
+# =====================================================
+networks:
+  # شبكة Coolify الرئيسية حيث يعمل Traefik proxy
+  coolify:
+    external: true
 
 # =====================================================
 # 🔒 Volumes - عزل البيانات الحرجة
