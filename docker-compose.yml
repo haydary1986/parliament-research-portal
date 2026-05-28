@@ -75,6 +75,10 @@ services:
       - default
       - coolify
 
+    # نخبر Traefik بأي شبكة يستخدم للوصول (لأن لدينا عدة شبكات)
+    labels:
+      - "traefik.docker.network=coolify"
+
     depends_on:
       - backend
 
