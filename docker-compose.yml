@@ -69,10 +69,24 @@ services:
     image: noab-frontend:latest
     restart: unless-stopped
 
-    # Coolify يكتشف SERVICE_FQDN_FRONTEND ويوجِّه Traefik
-    # في الـ local: استخدم profile للـ ports
     expose:
       - "80"
+
+    # 🔀 Traefik labels لـ Coolify routing
+    # Coolify يولِّد الـ FQDN في SERVICE_FQDN_FRONTEND env var
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.gzip-noab.compress=true"
+      - "traefik.http.middlewares.redirect-https-noab.redirectscheme.scheme=https"
+      - "traefik.http.routers.noab-http.rule=Host(`perl.algonest.tech`)"
+      - "traefik.http.routers.noab-http.entryPoints=http"
+      - "traefik.http.routers.noab-http.middlewares=redirect-https-noab"
+      - "traefik.http.routers.noab-https.rule=Host(`perl.algonest.tech`)"
+      - "traefik.http.routers.noab-https.entryPoints=https"
+      - "traefik.http.routers.noab-https.tls=true"
+      - "traefik.http.routers.noab-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.noab-https.middlewares=gzip-noab"
+      - "traefik.http.services.noab-frontend.loadbalancer.server.port=80"
 
     depends_on:
       - backend
