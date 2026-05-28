@@ -56,8 +56,8 @@ USER noab
 
 EXPOSE 8080
 
-# Health check للتأكد من أن الخادم يستجيب
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/security/stats 2>&1 | grep -q "401\|200" || exit 1
+# Health check - endpoint مخصص بدون auth
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD wget --quiet --tries=1 --output-document=- http://localhost:8080/api/healthz | grep -q '"ok"' || exit 1
 
 ENTRYPOINT ["/app/noab-server"]

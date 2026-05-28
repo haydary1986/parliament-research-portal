@@ -39,6 +39,13 @@ func main() {
 	// =============================================
 	mux.Handle("POST /api/auth/login", middleware.RateLimit(http.HandlerFunc(handlers.Login)))
 
+	// Health check endpoint للـ Docker/Kubernetes — لا يتطلب مصادقة
+	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	// =============================================
 	// أي مستخدم مسجل - Any Authenticated User
 	// =============================================
