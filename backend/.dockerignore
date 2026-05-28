@@ -1,0 +1,40 @@
+# Local development artifacts
+noab-server
+noab.db
+noab.db-shm
+noab.db-wal
+
+# Test artifacts
+*_test.go
+.test/
+
+# Local uploads (يجب أن تكون في volume خارجي)
+uploads/
+data/
+
+# Local certificates (يجب أن تكون mounted من المضيف أو عبر Let's Encrypt)
+certs/
+certs_bak/
+*.pem
+*.crt
+*.key
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Documentation (لا داعي لها في الـ image)
+*.md
+docs/

@@ -1,0 +1,38 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Build artifacts
+dist/
+build/
+
+# Test artifacts
+coverage/
+.nyc_output/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Env (يجب أن تأتي من Coolify env vars)
+.env
+.env.local
+.env.development
+.env.production
+
+# Documentation
+README.md
+*.md
+docs/

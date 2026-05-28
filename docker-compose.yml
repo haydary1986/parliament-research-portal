@@ -1,0 +1,126 @@
+# =====================================================
+# Parliament Research Portal - Docker Compose
+# =====================================================
+# مُجهَّز للنشر على Coolify مع عزل كامل لقاعدة البيانات
+#
+# 🔒 ملاحظة مهمة عن عزل البيانات:
+# - الـ volumes "noab_db_data" و "noab_uploads" مُعرَّفة كـ named volumes
+# - Docker يحتفظ بها مستقلة عن دورة حياة الـ containers
+# - عند rebuild/redeploy: البيانات تبقى كما هي ✓
+# - عند docker compose down: البيانات تبقى ✓
+# - فقط `docker volume rm noab_db_data` يحذفها (إجراء يدوي صريح)
+# =====================================================
+
+services:
+  # =====================================================
+  # Backend: Go API + SQLite
+  # =====================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: noab-backend:latest
+    container_name: noab-backend
+    restart: unless-stopped
+
+    environment:
+      # 🔐 مطلوبة - مفتاح JWT (32 حرف على الأقل)
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required and must be at least 32 chars}
+      # وضع الإنتاج - يجبر التحقق من JWT_SECRET ويفعّل سياسات صارمة
+      GO_ENV: ${GO_ENV:-production}
+      # دومين الـ Frontend المسموح به في CORS
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}
+      # مسار قاعدة البيانات - يشير لداخل volume خارجي (حماية البيانات)
+      DB_PATH: /app/data/noab.db
+      # تعطيل seed إذا كانت البيانات موجودة (idempotent بشكل افتراضي)
+      NO_SEED: ${NO_SEED:-false}
+      PORT: "8080"
+
+    volumes:
+      # 🔒 عزل قاعدة البيانات - النقطة الأهم
+      # named volume "noab_db_data" مستقل عن image
+      - noab_db_data:/app/data
+      # 🔒 عزل الملفات المرفوعة
+      - noab_uploads:/app/uploads
+
+    # لا تكشف port للخارج - فقط للـ frontend عبر الشبكة الداخلية
+    expose:
+      - "8080"
+
+    networks:
+      - noab-internal
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/api/security/stats"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
+  # =====================================================
+  # Frontend: React + Nginx
+  # =====================================================
+  frontend:
+    build:
+      context: ./deputy-portal
+      dockerfile: Dockerfile
+      args:
+        # فارغ يعني: استخدم نفس الـ origin + /api (proxy_pass في nginx يعالجه)
+        VITE_API_BASE: ""
+    image: noab-frontend:latest
+    container_name: noab-frontend
+    restart: unless-stopped
+
+    # Coolify سيتكفل بتعيين port خارجي تلقائياً عبر Traefik
+    # في الـ local: نكشف 3000
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    networks:
+      - noab-internal
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+# =====================================================
+# Networks
+# =====================================================
+networks:
+  noab-internal:
+    driver: bridge
+
+# =====================================================
+# 🔒 Volumes - عزل البيانات الحرجة
+# =====================================================
+volumes:
+  # قاعدة البيانات SQLite — تنجو من أي rebuild/redeploy
+  noab_db_data:
+    driver: local
+    name: noab_db_data
+
+  # الملفات المرفوعة (PDF, DOC, DOCX) — تنجو من أي rebuild/redeploy
+  noab_uploads:
+    driver: local
+    name: noab_uploads
