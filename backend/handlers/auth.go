@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -51,21 +52,25 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	user.DepartmentID = deptID
 
+	clientIP := middleware.ExtractIP(r.RemoteAddr)
+
 	// التحقق من كلمة المرور عبر bcrypt فقط
 	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(input.Password))
 	if err != nil {
-		middleware.RecordLoginAttempt(middleware.ExtractIP(r.RemoteAddr), false)
+		middleware.RecordLoginAttempt(clientIP, false)
 		writeJSON(w, http.StatusUnauthorized, models.APIResponse{
 			Success: false, Message: "بيانات الدخول غير صحيحة",
 		})
 		return
 	}
 
-	// نجاح - إلغاء Rate limit
-	middleware.RecordLoginAttempt(r.RemoteAddr, true)
+	// نجاح - إلغاء Rate limit (نفس صيغة IP المستخدمة في تسجيل الفشل)
+	middleware.RecordLoginAttempt(clientIP, true)
 
 	// تحديث آخر تسجيل دخول
-	db.DB.Exec("UPDATE users SET last_login = ? WHERE id = ?", time.Now(), user.ID)
+	if _, err := db.DB.Exec("UPDATE users SET last_login = ? WHERE id = ?", time.Now(), user.ID); err != nil {
+		log.Printf("Login last_login update failed: %v", err)
+	}
 
 	// جلب الصلاحيات
 	rows, err := db.DB.Query(`
@@ -162,22 +167,30 @@ func ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// جلب كلمة المرور الحالية
 	var currentHash string
-	db.DB.QueryRow("SELECT password_hash FROM users WHERE id = ?", userID).Scan(&currentHash)
+	if err := db.DB.QueryRow("SELECT password_hash FROM users WHERE id = ?", userID).Scan(&currentHash); err != nil {
+		writeJSON(w, http.StatusUnauthorized, models.APIResponse{Success: false, Message: "المستخدم غير موجود"})
+		return
+	}
 
-	// التحقق من كلمة المرور القديمة
-	err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(input.OldPassword))
-	if err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(input.OldPassword)); err != nil {
 		writeJSON(w, http.StatusUnauthorized, models.APIResponse{
 			Success: false, Message: "كلمة المرور الحالية غير صحيحة",
 		})
 		return
 	}
 
-	// تحديث كلمة المرور
-	newHash, _ := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
-	db.DB.Exec("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", string(newHash), userID)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		log.Printf("bcrypt generate failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "خطأ داخلي"})
+		return
+	}
+	if _, err := db.DB.Exec("UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", string(newHash), userID); err != nil {
+		log.Printf("ChangePassword UPDATE failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تحديث كلمة المرور"})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Message: "تم تغيير كلمة المرور بنجاح",

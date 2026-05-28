@@ -24,6 +24,10 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // قاعدة تجريبية وصارمة جداً — نسمح بـ setState في useEffect عند الحاجة
+      'react-hooks/set-state-in-effect': 'off',
+      // refresh الباحث عن مكونات فقط — نسمح بـ exports مساعدة
+      'react-refresh/only-export-components': 'warn',
     },
   },
 ])

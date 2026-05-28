@@ -59,11 +59,16 @@ export function createRequest(data) {
   return request('POST', '/requests', data);
 }
 
-export function assignRequest(id, departmentId) {
-  return request('PUT', `/requests/${id}/assign`, { department_id: departmentId });
+export function assignRequest(id, departmentIds) {
+  // يقبل مصفوفة أو string واحد (متوافق مع القديم)
+  const payload = Array.isArray(departmentIds)
+    ? { department_ids: departmentIds }
+    : { department_id: departmentIds };
+  return request('PUT', `/requests/${id}/assign`, payload);
 }
 
 export function confirmRequest(id, data) {
+  // data قد يحوي researcher_id واحد أو researcher_ids (مصفوفة)
   return request('PUT', `/requests/${id}/confirm`, data);
 }
 
@@ -151,11 +156,49 @@ export function returnRequest(id, data) {
   return request('PUT', `/requests/${id}/return`, data);
 }
 
+// ========== Final Review (Manager) ==========
+export function finalReviewRequest(id, decision, notes = '') {
+  return request('PUT', `/requests/${id}/final-review`, { decision, notes });
+}
+
+// ========== Info Request Response (Researcher) ==========
+export function updateInfoRequestResponse(id, data) {
+  return request('PUT', `/information-requests/${id}/response`, data);
+}
+
+// ========== Archive Consent (Researcher) ==========
+export function updateArchiveConsent(id, consent, notes = '') {
+  return request('PUT', `/research-tasks/${id}/archive-consent`, { consent, notes });
+}
+
+// ========== Workflow الجديد (req.md) ==========
+// رئيس القسم يراجع البحث المسلَّم
+export function deptHeadReview(id, decision, proofreaderId, notes = '') {
+  return request('PUT', `/requests/${id}/dept-review`, { decision, proofreader_id: proofreaderId, notes });
+}
+
+// الباحث يحيل للمعاون
+export function referToAssistant(taskId) {
+  return request('PUT', `/research-tasks/${taskId}/refer-assistant`);
+}
+
+// المعاون يدقق نهائياً
+export function assistantFinalReview(id, decision, notes = '') {
+  return request('PUT', `/requests/${id}/assistant-review`, { decision, notes });
+}
+
+// رئيس القسم يرسل البحث للنائب
+export function deptSendToDeputy(id) {
+  return request('PUT', `/requests/${id}/dept-send`);
+}
+
 // ========== Logout ==========
 export async function logout() {
   try {
     await request('POST', '/auth/logout');
-  } catch {}
+  } catch {
+    // ignore — local logout always succeeds
+  }
   authToken = null;
 }
 

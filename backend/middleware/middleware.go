@@ -89,21 +89,45 @@ func IsBlacklisted(tokenStr string) bool {
 	return exists
 }
 
-// تنظيف الـ tokens المنتهية كل ساعة
-func init() {
+// stopCleanup يوقف goroutine تنظيف الـ blacklist - مفيد للاختبار والإيقاف الآمن
+var stopCleanup = make(chan struct{})
+
+// StartBlacklistCleanup يبدأ goroutine لتنظيف الـ tokens المنتهية كل ساعة
+// يجب استدعاؤها مرة واحدة من main()
+func StartBlacklistCleanup() {
 	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
 		for {
-			time.Sleep(1 * time.Hour)
-			blacklistMu.Lock()
-			now := time.Now()
-			for token, expiry := range blacklist {
-				if now.After(expiry) {
-					delete(blacklist, token)
-				}
+			select {
+			case <-ticker.C:
+				cleanupExpiredTokens()
+			case <-stopCleanup:
+				return
 			}
-			blacklistMu.Unlock()
 		}
 	}()
+}
+
+// StopBlacklistCleanup يوقف goroutine التنظيف (للاختبار والإيقاف الآمن)
+func StopBlacklistCleanup() {
+	select {
+	case <-stopCleanup:
+		// مغلقة مسبقاً
+	default:
+		close(stopCleanup)
+	}
+}
+
+func cleanupExpiredTokens() {
+	blacklistMu.Lock()
+	defer blacklistMu.Unlock()
+	now := time.Now()
+	for token, expiry := range blacklist {
+		if now.After(expiry) {
+			delete(blacklist, token)
+		}
+	}
 }
 
 // =============================================

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('deputy', 'manager', 'department_head', 'researcher', 'proofreader', 'admin')),
+    role TEXT NOT NULL CHECK (role IN ('deputy', 'manager', 'department_head', 'researcher', 'proofreader', 'assistant_manager', 'admin')),
     department_id TEXT REFERENCES departments(id),
     deputy_id TEXT,
     committee TEXT,
@@ -69,8 +69,18 @@ CREATE TABLE IF NOT EXISTS requests (
     purpose TEXT CHECK (purpose IN ('oversight', 'legislative', 'other')),
     phone TEXT,
     email TEXT,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'confirmed', 'in_progress', 'review', 'proofreading', 'under_manager_review', 'delivered', 'completed', 'returned_exists', 'rejected')),
+    -- إضافة 'pending_dept_review', 'pending_assistant', 'pending_dept_send' للـ workflow الجديد
+    status TEXT DEFAULT 'pending' CHECK (status IN (
+        'pending', 'assigned', 'confirmed', 'in_progress', 'review',
+        'pending_dept_review', 'proofreading',
+        'pending_assistant', 'pending_dept_send',
+        'under_manager_review',
+        'delivered', 'completed', 'returned_exists', 'rejected'
+    )),
+    -- يبقى للقسم الرئيسي (متوافق مع القديم) - متعدد الأقسام في request_departments
     assigned_department TEXT REFERENCES departments(id),
+    -- موافقة النائب على نشر/توزيع البحث (نقطة 3 من بوابة النواب)
+    can_share INTEGER DEFAULT 0,
     date_received DATETIME DEFAULT CURRENT_TIMESTAMP,
     deadline DATETIME,
     referral_date DATETIME,
@@ -81,8 +91,22 @@ CREATE TABLE IF NOT EXISTS requests (
     archived_date DATETIME,
     final_review_by INTEGER REFERENCES users(id),
     final_review_date DATETIME,
+    -- المعاون يدقق نهائياً (workflow جديد)
+    assistant_review_by INTEGER REFERENCES users(id),
+    assistant_review_date DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- إحالات الطلب إلى أقسام متعددة - Request Departments (M:N)
+-- نقطة 1 من بوابة المدير: يمكن إحالة نفس الطلب لأكثر من قسم
+-- =============================================
+CREATE TABLE IF NOT EXISTS request_departments (
+    request_id TEXT REFERENCES requests(id) ON DELETE CASCADE,
+    department_id TEXT REFERENCES departments(id) ON DELETE CASCADE,
+    assigned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (request_id, department_id)
 );
 
 -- =============================================
@@ -212,3 +236,5 @@ CREATE INDEX IF NOT EXISTS idx_notes_entity ON notes(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON activity_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_entity ON activity_logs(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_request_departments_req ON request_departments(request_id);
+CREATE INDEX IF NOT EXISTS idx_request_departments_dept ON request_departments(department_id);

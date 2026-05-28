@@ -39,31 +39,35 @@ type Department struct {
 // الطلب - Request
 // =============================================
 type Request struct {
-	ID                 string              `json:"id"`
-	Title              string              `json:"title"`
-	Description        *string             `json:"description"`
-	DeputyID           *int                `json:"deputy_id"`
-	DeputyName         *string             `json:"deputy_name"`
-	Committee          *string             `json:"committee"`
-	Purpose            *string             `json:"purpose"`
-	Phone              *string             `json:"phone"`
-	Email              *string             `json:"email"`
-	Status             string              `json:"status"`
-	AssignedDepartment *string             `json:"assigned_department"`
-	DateReceived       time.Time           `json:"date_received"`
-	Deadline           *time.Time          `json:"deadline"`
-	ReferralDate       *time.Time          `json:"referral_date"`
-	CompletedDate      *time.Time          `json:"completed_date"`
-	ExistingResearchID *string             `json:"existing_research_id"`
-	DeliveredToDeputyDate *time.Time       `json:"delivered_to_deputy_date"`
-	Archived           int                 `json:"archived"`
-	ArchivedDate       *time.Time          `json:"archived_date"`
-	FinalReviewBy      *int                `json:"final_review_by"`
-	FinalReviewDate    *time.Time          `json:"final_review_date"`
-	CreatedAt          time.Time           `json:"created_at"`
-	UpdatedAt          time.Time           `json:"updated_at"`
-	Confirmation       *RequestConfirmation `json:"confirmation,omitempty"`
-	Notes              []Note              `json:"notes,omitempty"`
+	ID                    string               `json:"id"`
+	Title                 string               `json:"title"`
+	Description           *string              `json:"description"`
+	DeputyID              *int                 `json:"deputy_id"`
+	DeputyName            *string              `json:"deputy_name"`
+	Committee             *string              `json:"committee"`
+	Purpose               *string              `json:"purpose"`
+	Phone                 *string              `json:"phone"`
+	Email                 *string              `json:"email"`
+	Status                string               `json:"status"`
+	AssignedDepartment    *string              `json:"assigned_department"`
+	AssignedDepartments   []string             `json:"assigned_departments,omitempty"` // قائمة كاملة من جدول request_departments
+	CanShare              int                  `json:"can_share"`                       // موافقة النائب على نشر البحث
+	DateReceived          time.Time            `json:"date_received"`
+	Deadline              *time.Time           `json:"deadline"`
+	ReferralDate          *time.Time           `json:"referral_date"`
+	CompletedDate         *time.Time           `json:"completed_date"`
+	ExistingResearchID    *string              `json:"existing_research_id"`
+	DeliveredToDeputyDate *time.Time           `json:"delivered_to_deputy_date"`
+	Archived              int                  `json:"archived"`
+	ArchivedDate          *time.Time           `json:"archived_date"`
+	FinalReviewBy         *int                 `json:"final_review_by"`
+	FinalReviewDate       *time.Time           `json:"final_review_date"`
+	AssistantReviewBy     *int                 `json:"assistant_review_by"`
+	AssistantReviewDate   *time.Time           `json:"assistant_review_date"`
+	CreatedAt             time.Time            `json:"created_at"`
+	UpdatedAt             time.Time            `json:"updated_at"`
+	Confirmation          *RequestConfirmation `json:"confirmation,omitempty"`
+	Notes                 []Note               `json:"notes,omitempty"`
 }
 
 // =============================================
@@ -192,17 +196,23 @@ type CreateRequestInput struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Purpose     string `json:"purpose"`
+	Committee   string `json:"committee"`
+	CanShare    bool   `json:"can_share"` // موافقة النائب على نشر البحث
 }
 
+// AssignRequestInput يقبل قسماً واحداً أو قائمة (نقطة 1 من بوابة المدير)
 type AssignRequestInput struct {
-	DepartmentID string `json:"department_id"`
+	DepartmentID  string   `json:"department_id"`  // متوافق مع القديم
+	DepartmentIDs []string `json:"department_ids"` // الإحالة لأكثر من قسم
 }
 
+// ConfirmRequestInput يقبل باحثاً واحداً أو قائمة (نقطة 1 من بوابة القسم)
 type ConfirmRequestInput struct {
 	ServiceType    string `json:"service_type"`
 	Classification string `json:"classification"`
 	CompletionDays int    `json:"completion_days"`
-	ResearcherID   int    `json:"researcher_id"`
+	ResearcherID   int    `json:"researcher_id"`   // متوافق مع القديم
+	ResearcherIDs  []int  `json:"researcher_ids"`  // تعيين باحثين متعددين
 }
 
 type CreateInfoRequestInput struct {

@@ -1,1364 +1,585 @@
-import { useState, useEffect } from 'react';
-import { User, Lock, FileText, Clock, CheckCircle, AlertCircle, LogOut, Eye, Bell, Home, List, Settings, ChevronLeft, Building, Upload, Play, Check, X, Calendar, MessageSquare, ArrowLeft, Users, ClipboardCheck, UserPlus, Plus, Trash2, Phone, Mail, BookOpen, Edit } from 'lucide-react';
-import * as api from './api';
+import { useEffect, useState } from 'react'
+import PortalLayout from './components/layout/PortalLayout'
+import StatusBadge from './components/ui/StatusBadge'
+import StatCard from './components/ui/StatCard'
+import Modal from './components/ui/Modal'
+import EmptyState from './components/ui/EmptyState'
+import { PageLoader } from './components/ui/Spinner'
+import { useToast } from './components/ui/Toast'
+import {
+  IconDashboard, IconRequests, IconResearch, IconProofread, IconUsers,
+  IconDocument, IconClock, IconCheck, IconPlus, IconSearch,
+} from './components/icons/Icons'
+import { formatDate, formatDateTime, SERVICE_TYPES, CLASSIFICATIONS } from './lib/format'
+import * as api from './api'
 
-export default function DepartmentPortal({ onSwitchPortal, user }) {
-  const [isLoggedIn, setIsLoggedIn] = useState(!!user);
-  const [currentPage, setCurrentPage] = useState('dashboard');
-  const [loginData, setLoginData] = useState({ username: user?.name || '', password: '', department: user?.email === 'suad@parliament.iq' ? 'financial' : user?.email === 'hassan@parliament.iq' ? 'political' : user?.email === 'ali.m@parliament.iq' ? 'legal' : '' });
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState(null);
-  const [showCompleteModal, setShowCompleteModal] = useState(false);
-  const [completionNote, setCompletionNote] = useState('');
+export default function DepartmentPortal({ user, onLogout }) {
+  const [tab, setTab] = useState('dashboard')
+  const [requests, setRequests] = useState([])
+  const [researchTasks, setResearchTasks] = useState([])
+  const [proofreaders, setProofreaders] = useState([])
+  const [researchers, setResearchers] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [activeRequest, setActiveRequest] = useState(null)
+  const [activeTask, setActiveTask] = useState(null)
+  const [createUserOpen, setCreateUserOpen] = useState(false)
+  const toast = useToast()
 
-  // حالة نافذة التأكيد
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [confirmRequest, setConfirmRequest] = useState(null);
-  const [confirmData, setConfirmData] = useState({
-    serviceType: '',
-    classification: '',
-    completionDays: 30
-  });
-
-  // أنواع الخدمات
-  const serviceTypes = [
-    { id: 'study', name: 'دراسة' },
-    { id: 'report', name: 'تقرير' },
-    { id: 'briefing', name: 'ورقة إحاطة' },
-    { id: 'opinion', name: 'بيان رأي' },
-    { id: 'parliamentary_question', name: 'سؤال نيابي' },
-  ];
-
-  // تصنيفات الخدمة البحثية
-  const classifications = [
-    { id: 'scientific', name: 'علمي' },
-    { id: 'social', name: 'اجتماعي' },
-    { id: 'political', name: 'سياسي' },
-    { id: 'legal', name: 'قانوني' },
-    { id: 'financial', name: 'مالية واقتصادية' },
-  ];
-
-  // قائمة الأقسام
-  const departmentsList = [
-    { id: 'financial', name: 'قسم البحوث المالية والاقتصادية', head: 'د. علي حسن', color: 'from-blue-500 to-blue-600' },
-    { id: 'political', name: 'قسم البحوث السياسية', head: 'د. فاطمة أحمد', color: 'from-purple-500 to-purple-600' },
-    { id: 'legal', name: 'قسم الدراسات القانونية', head: 'أ. محمد سالم', color: 'from-amber-500 to-amber-600' },
-    { id: 'social', name: 'قسم البحوث الاجتماعية', head: 'د. زينب كريم', color: 'from-pink-500 to-pink-600' },
-    { id: 'scientific', name: 'قسم البحوث العلمية', head: 'د. أحمد جواد', color: 'from-teal-500 to-teal-600' },
-  ];
-
-  // القسم الحالي (بعد تسجيل الدخول)
-  const currentDepartment = departmentsList.find(d => d.id === loginData.department) || departmentsList[0];
-
-  // الطلبات الموجهة للقسم
-  const [requests, setRequests] = useState([]);
-
-  // جلب الطلبات والموظفين من API
-  useEffect(() => {
-    if (!isLoggedIn || !api.getToken()) return;
-    api.getRequests({ department: loginData.department }).then(res => {
-      if (res.success && res.data) {
-        setRequests(res.data.map(r => ({
-          id: r.id, title: r.title, deputy: r.deputy_name || '', committee: r.committee || '',
-          purpose: r.purpose || '', dateReceived: r.date_received?.split('T')[0] || '',
-          deadline: r.deadline?.split('T')[0] || '', status: r.status === 'assigned' ? 'new' : r.status,
-          assignedTo: r.assigned_department, description: r.description || '',
-          researcher: null, notes: [], phone: r.phone || '', email: r.email || '',
-        })));
-      }
-    }).catch(() => {});
-    api.getUsers({ department: loginData.department }).then(res => {
-      if (res.success && res.data) {
-        const apiStaff = res.data.filter(u => u.role === 'researcher' || u.role === 'proofreader').map(u => ({
-          id: u.id, name: u.name, role: u.role, specialization: u.specialization || '',
-          department: u.department_id || loginData.department, email: u.email, phone: u.phone || '',
-          status: u.status, activeTasks: 0, permissions: u.permissions || [],
-        }));
-        if (apiStaff.length > 0) setStaff(prev => [...apiStaff, ...prev.filter(s => !apiStaff.find(a => a.email === s.email))]);
-      }
-    }).catch(() => {});
-  }, [isLoggedIn, loginData.department]);
-
-  // موظفو القسم (باحثين + مدققين)
-  const [staff, setStaff] = useState([
-    { id: 1, name: 'د. نور الدين', role: 'researcher', specialization: 'اقتصاد', department: 'financial', email: 'nour@parliament.iq', phone: '0770 111 2222', status: 'active', activeTasks: 1, permissions: ['view_assigned', 'submit_research', 'request_info'] },
-    { id: 2, name: 'أ. حسين محمد', role: 'researcher', specialization: 'علاقات دولية', department: 'political', email: 'hussein@parliament.iq', phone: '0770 222 3333', status: 'active', activeTasks: 2, permissions: ['view_assigned', 'submit_research', 'request_info'] },
-    { id: 3, name: 'أ. رنا علي', role: 'researcher', specialization: 'قانون دستوري', department: 'legal', email: 'rana@parliament.iq', phone: '0770 333 4444', status: 'active', activeTasks: 0, permissions: ['view_assigned', 'submit_research', 'request_info'] },
-    { id: 4, name: 'د. سمية أحمد', role: 'researcher', specialization: 'علم اجتماع', department: 'social', email: 'sumaya@parliament.iq', phone: '0770 444 5555', status: 'active', activeTasks: 1, permissions: ['view_assigned', 'submit_research'] },
-    { id: 5, name: 'د. كريم حسن', role: 'researcher', specialization: 'بيئة', department: 'scientific', email: 'kareem@parliament.iq', phone: '0770 555 6666', status: 'active', activeTasks: 0, permissions: ['view_assigned', 'submit_research', 'request_info'] },
-    { id: 6, name: 'أ. محمد الخطاط', role: 'proofreader', specialization: 'تدقيق لغوي', department: 'financial', email: 'mohammed.k@parliament.iq', phone: '0770 666 7777', status: 'active', activeTasks: 1, permissions: ['proofread', 'edit_research'] },
-    { id: 7, name: 'أ. هدى السامرائي', role: 'proofreader', specialization: 'تدقيق لغوي', department: 'legal', email: 'huda@parliament.iq', phone: '0770 777 8888', status: 'active', activeTasks: 0, permissions: ['proofread', 'edit_research'] },
-    { id: 8, name: 'أ. ياسر الكناني', role: 'proofreader', specialization: 'تدقيق لغوي', department: 'political', email: 'yaser@parliament.iq', phone: '0770 888 9999', status: 'active', activeTasks: 0, permissions: ['proofread'] },
-  ]);
-
-  // الصلاحيات المتاحة لموظفي القسم
-  const staffPermissions = [
-    { id: 'view_assigned', name: 'عرض المهام المسندة', category: 'البحوث', roles: ['researcher'] },
-    { id: 'submit_research', name: 'تسليم البحث', category: 'البحوث', roles: ['researcher'] },
-    { id: 'request_info', name: 'طلب معلومات من جهات', category: 'البحوث', roles: ['researcher'] },
-    { id: 'view_department', name: 'عرض بيانات القسم', category: 'القسم', roles: ['researcher', 'proofreader'] },
-    { id: 'proofread', name: 'التدقيق اللغوي', category: 'التدقيق', roles: ['proofreader'] },
-    { id: 'edit_research', name: 'تعديل البحث', category: 'التدقيق', roles: ['proofreader'] },
-    { id: 'view_all_research', name: 'عرض جميع بحوث القسم', category: 'القسم', roles: ['researcher', 'proofreader'] },
-  ];
-
-  const staffRoles = [
-    { id: 'researcher', name: 'باحث', color: 'bg-cyan-100 text-cyan-700', dotColor: 'bg-cyan-500' },
-    { id: 'proofreader', name: 'مدقق لغوي', color: 'bg-rose-100 text-rose-700', dotColor: 'bg-rose-500' },
-  ];
-
-  // إدارة الموظفين
-  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
-  const [showPermissionsModal, setShowPermissionsModal] = useState(false);
-  const [selectedStaff, setSelectedStaff] = useState(null);
-  const [staffFilter, setStaffFilter] = useState('all');
-  const [newStaff, setNewStaff] = useState({ name: '', email: '', phone: '', specialization: '', role: 'researcher' });
-
-  const handleAddStaff = () => {
-    if (!newStaff.name || !newStaff.email || !newStaff.specialization) {
-      alert('يرجى ملء جميع الحقول المطلوبة');
-      return;
-    }
-    const defaultPerms = newStaff.role === 'researcher'
-      ? ['view_assigned', 'submit_research', 'request_info']
-      : ['proofread', 'edit_research'];
-    const member = {
-      id: Date.now(),
-      name: newStaff.name,
-      email: newStaff.email,
-      phone: newStaff.phone,
-      specialization: newStaff.specialization,
-      role: newStaff.role,
-      department: loginData.department,
-      status: 'active',
-      activeTasks: 0,
-      permissions: defaultPerms,
-    };
-    setStaff([...staff, member]);
-    setShowAddStaffModal(false);
-    setNewStaff({ name: '', email: '', phone: '', specialization: '', role: 'researcher' });
-  };
-
-  const handleToggleStaffStatus = (staffId) => {
-    setStaff(staff.map(s =>
-      s.id === staffId ? { ...s, status: s.status === 'active' ? 'inactive' : 'active' } : s
-    ));
-  };
-
-  const handleDeleteStaff = (staffId) => {
-    const member = staff.find(s => s.id === staffId);
-    if (member?.activeTasks > 0) {
-      alert('لا يمكن حذف موظف لديه مهام نشطة');
-      return;
-    }
-    if (confirm(`هل أنت متأكد من حذف "${member?.name}"؟`)) {
-      setStaff(staff.filter(s => s.id !== staffId));
-    }
-  };
-
-  const handleTogglePermission = (staffId, permId) => {
-    setStaff(staff.map(s => {
-      if (s.id !== staffId) return s;
-      const has = s.permissions.includes(permId);
-      return { ...s, permissions: has ? s.permissions.filter(p => p !== permId) : [...s.permissions, permId] };
-    }));
-  };
-
-  const myStaff = staff.filter(s => s.department === loginData.department);
-  const myResearchers = myStaff.filter(s => s.role === 'researcher');
-  const myProofreaders = myStaff.filter(s => s.role === 'proofreader');
-  const filteredStaff = staffFilter === 'all' ? myStaff : myStaff.filter(s => s.role === staffFilter);
-
-  // للتوافق مع باقي الكود القديم
-  const researchers = staff;
-
-  const notifications = [
-    { id: 1, text: 'طلب جديد تم توجيهه للقسم', time: 'منذ ساعة', read: false },
-    { id: 2, text: 'تذكير: موعد تسليم REQ-003 بعد أسبوع', time: 'منذ يوم', read: false },
-  ];
-
-  const getStatusInfo = (status) => {
-    switch(status) {
-      case 'new': return { label: 'جديد', color: 'bg-orange-500', bgLight: 'bg-orange-100 text-orange-700', icon: AlertCircle };
-      case 'in_progress': return { label: 'قيد الإعداد', color: 'bg-blue-500', bgLight: 'bg-blue-100 text-blue-700', icon: Play };
-      case 'review': return { label: 'قيد المراجعة', color: 'bg-yellow-500', bgLight: 'bg-yellow-100 text-yellow-700', icon: Eye };
-      case 'completed': return { label: 'مكتمل', color: 'bg-green-500', bgLight: 'bg-green-100 text-green-700', icon: CheckCircle };
-      default: return { label: 'غير محدد', color: 'bg-gray-500', bgLight: 'bg-gray-100 text-gray-700', icon: Clock };
-    }
-  };
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (loginData.username && loginData.password && loginData.department) {
-      setIsLoggedIn(true);
-    }
-  };
-
-  // بدء العمل على طلب
-  const handleStartWork = (requestId, researcherId) => {
-    const researcher = researchers.find(r => r.id === researcherId);
-    setRequests(prev => prev.map(req =>
-      req.id === requestId
-        ? {
-            ...req,
-            status: 'in_progress',
-            researcher: researcher?.name,
-            notes: [...req.notes, { date: new Date().toISOString().split('T')[0], text: `تم تكليف ${researcher?.name} بالعمل على الطلب` }]
-          }
-        : req
-    ));
-    setSelectedRequest(null);
-  };
-
-  // إرسال للمراجعة
-  const handleSendToReview = (requestId) => {
-    setRequests(prev => prev.map(req =>
-      req.id === requestId
-        ? {
-            ...req,
-            status: 'review',
-            notes: [...req.notes, { date: new Date().toISOString().split('T')[0], text: 'تم إرسال البحث للمراجعة النهائية' }]
-          }
-        : req
-    ));
-  };
-
-  // إكمال الطلب
-  const handleCompleteRequest = (requestId) => {
-    setRequests(prev => prev.map(req =>
-      req.id === requestId
-        ? {
-            ...req,
-            status: 'completed',
-            completedDate: new Date().toISOString().split('T')[0],
-            notes: [...req.notes, { date: new Date().toISOString().split('T')[0], text: completionNote || 'تم إكمال البحث وتسليمه' }]
-          }
-        : req
-    ));
-    setShowCompleteModal(false);
-    setCompletionNote('');
-    setSelectedRequest(null);
-  };
-
-  // إضافة ملاحظة
-  const handleAddNote = (requestId, noteText) => {
-    if (!noteText.trim()) return;
-    setRequests(prev => prev.map(req =>
-      req.id === requestId
-        ? {
-            ...req,
-            notes: [...req.notes, { date: new Date().toISOString().split('T')[0], text: noteText }]
-          }
-        : req
-    ));
-  };
-
-  // فتح نافذة التأكيد
-  const handleOpenConfirm = (request) => {
-    setConfirmRequest(request);
-    setConfirmData({
-      serviceType: '',
-      classification: '',
-      completionDays: 30
-    });
-    setShowConfirmModal(true);
-  };
-
-  // تأكيد الطلب
-  const handleConfirmRequest = () => {
-    if (!confirmData.serviceType || !confirmData.classification) {
-      alert('يرجى تحديد نوع الخدمة والتصنيف');
-      return;
-    }
-    const referralDate = new Date().toISOString().split('T')[0];
-    const deadline = new Date();
-    deadline.setDate(deadline.getDate() + confirmData.completionDays);
-
-    setRequests(prev => prev.map(req =>
-      req.id === confirmRequest.id
-        ? {
-            ...req,
-            serviceType: confirmData.serviceType,
-            classification: confirmData.classification,
-            referralDate: referralDate,
-            completionDays: confirmData.completionDays,
-            deadline: deadline.toISOString().split('T')[0],
-            confirmed: true,
-            notes: [...req.notes, {
-              date: referralDate,
-              text: `تم تأكيد الطلب - نوع الخدمة: ${serviceTypes.find(s => s.id === confirmData.serviceType)?.name} - التصنيف: ${classifications.find(c => c.id === confirmData.classification)?.name} - مدة الإنجاز: ${confirmData.completionDays} يوم`
-            }]
-          }
-        : req
-    ));
-    setShowConfirmModal(false);
-    setConfirmRequest(null);
-  };
-
-  // فلترة الطلبات حسب القسم
-  const departmentRequests = requests.filter(r => r.assignedTo === loginData.department);
-
-  const stats = {
-    total: departmentRequests.length,
-    new: departmentRequests.filter(r => r.status === 'new').length,
-    inProgress: departmentRequests.filter(r => r.status === 'in_progress').length,
-    review: departmentRequests.filter(r => r.status === 'review').length,
-    completed: departmentRequests.filter(r => r.status === 'completed').length,
-  };
-
-  // صفحة تسجيل الدخول
-  if (!isLoggedIn) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-slate-800 flex items-center justify-center p-4" dir="rtl">
-        <div className="w-full max-w-md">
-          {/* زر العودة */}
-          <button
-            onClick={onSwitchPortal}
-            className="mb-6 flex items-center gap-2 text-indigo-300 hover:text-indigo-200 transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            العودة للصفحة الرئيسية
-          </button>
-
-          {/* الشعار والعنوان */}
-          <div className="text-center mb-8">
-            <div className="w-24 h-24 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full mx-auto mb-4 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-              <Users className="w-12 h-12 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold text-white mb-2">دائرة البحوث والدراسات</h1>
-            <p className="text-indigo-300">بوابة الأقسام البحثية</p>
-          </div>
-
-          {/* نموذج تسجيل الدخول */}
-          <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-8 border border-white/20 shadow-2xl">
-            <h2 className="text-xl font-bold text-white text-center mb-6">تسجيل دخول القسم</h2>
-
-            <form onSubmit={handleLogin} className="space-y-5">
-              {/* اختيار القسم */}
-              <div>
-                <label className="block text-indigo-200 text-sm mb-2">القسم</label>
-                <div className="relative">
-                  <Building className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-300" />
-                  <select
-                    value={loginData.department}
-                    onChange={(e) => setLoginData({...loginData, department: e.target.value})}
-                    className="w-full bg-white/10 border border-white/20 rounded-xl py-3 pr-11 pl-4 text-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent appearance-none"
-                    required
-                  >
-                    <option value="" className="text-slate-900">اختر القسم</option>
-                    {departmentsList.map(dept => (
-                      <option key={dept.id} value={dept.id} className="text-slate-900">{dept.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-indigo-200 text-sm mb-2">اسم المستخدم</label>
-                <div className="relative">
-                  <User className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-300" />
-                  <input
-                    type="text"
-                    value={loginData.username}
-                    onChange={(e) => setLoginData({...loginData, username: e.target.value})}
-                    className="w-full bg-white/10 border border-white/20 rounded-xl py-3 pr-11 pl-4 text-white placeholder-indigo-300/50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-                    placeholder="أدخل اسم المستخدم"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-indigo-200 text-sm mb-2">كلمة المرور</label>
-                <div className="relative">
-                  <Lock className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-indigo-300" />
-                  <input
-                    type="password"
-                    value={loginData.password}
-                    onChange={(e) => setLoginData({...loginData, password: e.target.value})}
-                    className="w-full bg-white/10 border border-white/20 rounded-xl py-3 pr-11 pl-4 text-white placeholder-indigo-300/50 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
-                    placeholder="أدخل كلمة المرور"
-                    required
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full bg-gradient-to-r from-indigo-400 to-purple-500 text-white font-bold py-3 rounded-xl hover:from-indigo-500 hover:to-purple-600 transition-all shadow-lg shadow-indigo-500/30"
-              >
-                دخول
-              </button>
-            </form>
-          </div>
-        </div>
-      </div>
-    );
+  const refresh = async () => {
+    setLoading(true)
+    try {
+      const [r, t, prf, res] = await Promise.all([
+        api.getRequests({ limit: 200 }),
+        api.getResearchTasks(),
+        api.getUsers({ role: 'proofreader', limit: 50 }),
+        api.getUsers({ role: 'researcher', department: user?.department_id || '', limit: 50 }),
+      ])
+      if (r.success) setRequests(r.data || [])
+      if (t.success) setResearchTasks(t.data || [])
+      if (prf.success) setProofreaders(prf.data || [])
+      if (res.success) setResearchers(res.data || [])
+    } catch (e) { toast.error(e.message) }
+    finally { setLoading(false) }
   }
 
-  // لوحة تحكم القسم
+  useEffect(() => { refresh() }, [user?.department_id])
+
+  const incoming = requests.filter((r) => r.status === 'assigned')
+  const inProgress = requests.filter((r) => ['confirmed', 'in_progress', 'review'].includes(r.status))
+
+  const navItems = [
+    { key: 'dashboard', label: 'لوحة المعلومات', icon: IconDashboard },
+    { key: 'incoming', label: 'طلبات واردة', icon: IconClock, badge: incoming.length },
+    { key: 'in_progress', label: 'قيد التنفيذ', icon: IconDocument },
+    { key: 'research', label: 'مهام البحث', icon: IconResearch },
+    { key: 'team', label: 'فريق القسم', icon: IconUsers },
+  ]
+
+  const meta = {
+    dashboard: { title: 'لوحة معلومات القسم', subtitle: 'متابعة عمل القسم البحثي' },
+    incoming: { title: 'الطلبات الواردة', subtitle: 'طلبات بحاجة إلى تأكيد وتعيين باحث' },
+    in_progress: { title: 'الطلبات الجارية', subtitle: 'طلبات بدأ العمل عليها' },
+    research: { title: 'مهام البحث', subtitle: 'كل المهام البحثية للقسم' },
+    team: { title: 'فريق القسم', subtitle: 'الباحثون وإدارة الفريق' },
+  }
+
   return (
-    <div className="min-h-screen bg-slate-100" dir="rtl">
-      {/* الشريط العلوي */}
-      <header className={`bg-gradient-to-r ${currentDepartment.color} text-white shadow-lg`}>
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-              <Building className="w-6 h-6" />
-            </div>
-            <div>
-              <h1 className="font-bold">{currentDepartment.name}</h1>
-              <p className="text-xs text-white/80">رئيس القسم: {currentDepartment.head}</p>
-            </div>
-          </div>
+    <PortalLayout
+      user={user}
+      portalLabel="رئيس القسم"
+      navItems={navItems}
+      activeKey={tab}
+      onNavigate={setTab}
+      onLogout={onLogout}
+      title={meta[tab].title}
+      subtitle={meta[tab].subtitle}
+      actions={tab === 'team' && (
+        <button onClick={() => setCreateUserOpen(true)} className="btn-gold">
+          <IconPlus className="w-4 h-4" />
+          <span>إضافة عضو</span>
+        </button>
+      )}
+    >
+      {loading ? <PageLoader /> : (
+        <>
+          {tab === 'dashboard' && <DeptDashboard requests={requests} tasks={researchTasks} researchers={researchers} />}
+          {tab === 'incoming' && <RequestsTable rows={incoming} onOpen={setActiveRequest} emptyText="لا توجد طلبات واردة" />}
+          {tab === 'in_progress' && <RequestsTable rows={inProgress} onOpen={setActiveRequest} emptyText="لا توجد طلبات قيد التنفيذ" />}
+          {tab === 'research' && <ResearchTasksTable rows={researchTasks} onOpen={setActiveTask} />}
+          {tab === 'team' && <TeamView researchers={researchers} />}
+        </>
+      )}
 
-          <div className="flex items-center gap-4">
-            {/* الإشعارات */}
-            <div className="relative">
-              <button
-                onClick={() => setShowNotifications(!showNotifications)}
-                className="relative p-2 hover:bg-white/10 rounded-full transition-colors"
-              >
-                <Bell className="w-6 h-6" />
-                <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center">
-                  {notifications.filter(n => !n.read).length}
-                </span>
-              </button>
+      <ConfirmRequestModal
+        request={activeRequest}
+        researchers={researchers}
+        proofreaders={proofreaders}
+        onClose={() => setActiveRequest(null)}
+        onChanged={() => { setActiveRequest(null); refresh() }}
+      />
+      <ResearchTaskModal
+        task={activeTask}
+        proofreaders={proofreaders}
+        onClose={() => setActiveTask(null)}
+        onChanged={() => { setActiveTask(null); refresh() }}
+      />
+      <CreateUserModal
+        open={createUserOpen}
+        onClose={() => setCreateUserOpen(false)}
+        onCreated={() => { setCreateUserOpen(false); refresh(); toast.success('تم إضافة المستخدم') }}
+      />
+    </PortalLayout>
+  )
+}
 
-              {showNotifications && (
-                <div className="absolute left-0 top-full mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50">
-                  <div className={`bg-gradient-to-r ${currentDepartment.color} text-white px-4 py-3 font-bold`}>الإشعارات</div>
-                  <div className="max-h-64 overflow-y-auto">
-                    {notifications.map(notif => (
-                      <div key={notif.id} className={`px-4 py-3 border-b border-slate-100 hover:bg-slate-50 ${!notif.read ? 'bg-indigo-50' : ''}`}>
-                        <p className="text-sm text-slate-700">{notif.text}</p>
-                        <p className="text-xs text-slate-400 mt-1">{notif.time}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* معلومات المستخدم */}
-            <div className="flex items-center gap-3 bg-white/10 rounded-full pr-2 pl-4 py-1">
-              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-                <User className="w-5 h-5" />
-              </div>
-              <div className="text-right">
-                <p className="font-semibold text-sm">{loginData.username}</p>
-                <p className="text-xs text-white/80">باحث</p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setIsLoggedIn(false)}
-              className="p-2 hover:bg-red-500/20 rounded-full transition-colors"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 py-6 flex gap-6">
-        {/* القائمة الجانبية */}
-        <aside className="w-64 flex-shrink-0">
-          <nav className="bg-white rounded-2xl shadow-sm overflow-hidden">
-            <div className={`p-4 bg-gradient-to-r ${currentDepartment.color} text-white`}>
-              <p className="font-bold">القائمة الرئيسية</p>
-            </div>
-            <div className="p-2">
-              {[
-                { id: 'dashboard', label: 'لوحة التحكم', icon: Home },
-                { id: 'requests', label: 'الطلبات الواردة', icon: List },
-                { id: 'in-progress', label: 'قيد الإعداد', icon: Play },
-                { id: 'completed', label: 'المكتملة', icon: CheckCircle },
-                { id: 'staff', label: 'إدارة الموظفين', icon: Users },
-                { id: 'settings', label: 'الإعدادات', icon: Settings },
-              ].map(item => (
-                <button
-                  key={item.id}
-                  onClick={() => setCurrentPage(item.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                    currentPage === item.id
-                      ? 'bg-indigo-500 text-white'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <item.icon className="w-5 h-5" />
-                  {item.label}
-                  {item.id === 'requests' && stats.new > 0 && (
-                    <span className="mr-auto bg-orange-500 text-white text-xs px-2 py-0.5 rounded-full">{stats.new}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </nav>
-
-          {/* زر العودة */}
-          <button
-            onClick={onSwitchPortal}
-            className="mt-4 w-full bg-slate-200 text-slate-700 py-3 px-4 rounded-xl hover:bg-slate-300 transition-colors flex items-center justify-center gap-2"
-          >
-            <ArrowLeft className="w-5 h-5" />
-            الصفحة الرئيسية
-          </button>
-        </aside>
-
-        {/* المحتوى الرئيسي */}
-        <main className="flex-1">
-          {/* لوحة التحكم */}
-          {currentPage === 'dashboard' && (
-            <div className="space-y-6">
-              {/* الإحصائيات */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {[
-                  { label: 'إجمالي الطلبات', value: stats.total, icon: FileText, color: 'from-slate-500 to-slate-600' },
-                  { label: 'طلبات جديدة', value: stats.new, icon: AlertCircle, color: 'from-orange-500 to-orange-600' },
-                  { label: 'قيد الإعداد', value: stats.inProgress, icon: Play, color: 'from-blue-500 to-blue-600' },
-                  { label: 'مكتملة', value: stats.completed, icon: CheckCircle, color: 'from-green-500 to-green-600' },
-                ].map((stat, idx) => (
-                  <div key={idx} className="bg-white rounded-2xl p-5 shadow-sm">
-                    <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center mb-3`}>
-                      <stat.icon className="w-6 h-6 text-white" />
-                    </div>
-                    <p className="text-3xl font-bold text-slate-800">{stat.value}</p>
-                    <p className="text-slate-500 text-sm">{stat.label}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* الطلبات الجديدة */}
-              {stats.new > 0 && (
-                <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-                  <div className="px-6 py-4 border-b border-slate-100 bg-orange-50 flex items-center justify-between">
-                    <h2 className="font-bold text-slate-800 flex items-center gap-2">
-                      <AlertCircle className="w-5 h-5 text-orange-500" />
-                      طلبات جديدة تحتاج للتعيين
-                    </h2>
-                    <span className="bg-orange-500 text-white px-3 py-1 rounded-full text-sm">{stats.new}</span>
-                  </div>
-                  <div className="divide-y divide-slate-100">
-                    {departmentRequests.filter(r => r.status === 'new').map(req => (
-                      <div key={req.id} className="px-6 py-4 hover:bg-slate-50 transition-colors">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center">
-                              <FileText className="w-5 h-5 text-orange-500" />
-                            </div>
-                            <div>
-                              <p className="font-semibold text-slate-800">{req.title}</p>
-                              <p className="text-sm text-slate-500">{req.deputy} • {req.committee}</p>
-                            </div>
-                          </div>
-                          <div className="flex gap-2">
-                            {!req.confirmed ? (
-                              <button
-                                onClick={() => handleOpenConfirm(req)}
-                                className="bg-amber-500 text-white px-4 py-2 rounded-lg hover:bg-amber-600 transition-colors flex items-center gap-2"
-                              >
-                                <ClipboardCheck className="w-4 h-4" />
-                                تأكيد
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => setSelectedRequest(req)}
-                                className="bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition-colors flex items-center gap-2"
-                              >
-                                <Play className="w-4 h-4" />
-                                تعيين باحث
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* الطلبات قيد الإعداد */}
-              <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                  <h2 className="font-bold text-slate-800">الطلبات قيد العمل</h2>
-                  <button
-                    onClick={() => setCurrentPage('in-progress')}
-                    className="text-indigo-500 text-sm hover:text-indigo-600 flex items-center gap-1"
-                  >
-                    عرض الكل <ChevronLeft className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {departmentRequests.filter(r => r.status === 'in_progress' || r.status === 'review').slice(0, 3).map(req => (
-                    <div key={req.id} className="px-6 py-4 hover:bg-slate-50 transition-colors">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                            req.status === 'review' ? 'bg-yellow-100' : 'bg-blue-100'
-                          }`}>
-                            <FileText className={`w-5 h-5 ${
-                              req.status === 'review' ? 'text-yellow-500' : 'text-blue-500'
-                            }`} />
-                          </div>
-                          <div>
-                            <p className="font-semibold text-slate-800">{req.title}</p>
-                            <p className="text-sm text-slate-500">الباحث: {req.researcher}</p>
-                          </div>
-                        </div>
-                        <span className={`px-3 py-1 rounded-full text-xs ${getStatusInfo(req.status).bgLight}`}>
-                          {getStatusInfo(req.status).label}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  {stats.inProgress === 0 && stats.review === 0 && (
-                    <div className="px-6 py-8 text-center text-slate-500">
-                      لا توجد طلبات قيد العمل حالياً
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* صفحة الطلبات الواردة */}
-          {currentPage === 'requests' && (
-            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100">
-                <h2 className="text-xl font-bold text-slate-800">جميع الطلبات الواردة</h2>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {departmentRequests.map(req => (
-                  <div key={req.id} className="px-6 py-5 hover:bg-slate-50 transition-colors">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-start gap-4">
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                          req.status === 'new' ? 'bg-orange-100' :
-                          req.status === 'completed' ? 'bg-green-100' :
-                          req.status === 'review' ? 'bg-yellow-100' : 'bg-blue-100'
-                        }`}>
-                          <FileText className={`w-6 h-6 ${
-                            req.status === 'new' ? 'text-orange-500' :
-                            req.status === 'completed' ? 'text-green-500' :
-                            req.status === 'review' ? 'text-yellow-500' : 'text-blue-500'
-                          }`} />
-                        </div>
-                        <div>
-                          <p className="font-bold text-slate-800">{req.title}</p>
-                          <p className="text-sm text-slate-500 mt-1">{req.id} • {req.deputy}</p>
-                          <p className="text-sm text-slate-400 mt-1">
-                            الغرض: {req.purpose} • الموعد النهائي: {req.deadline}
-                          </p>
-                          {req.researcher && (
-                            <p className="text-sm text-indigo-600 mt-1">الباحث: {req.researcher}</p>
-                          )}
-                        </div>
-                      </div>
-                      <span className={`px-3 py-1 rounded-full text-sm text-white ${getStatusInfo(req.status).color}`}>
-                        {getStatusInfo(req.status).label}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                      <p className="text-sm text-slate-400">تاريخ الاستلام: {req.dateReceived}</p>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setSelectedRequest(req)}
-                          className="text-indigo-500 hover:text-indigo-700 text-sm flex items-center gap-1"
-                        >
-                          <Eye className="w-4 h-4" /> التفاصيل
-                        </button>
-                        {req.status === 'new' && !req.confirmed && (
-                          <button
-                            onClick={() => handleOpenConfirm(req)}
-                            className="bg-amber-500 text-white px-3 py-1 rounded-lg hover:bg-amber-600 text-sm flex items-center gap-1"
-                          >
-                            <ClipboardCheck className="w-4 h-4" /> تأكيد
-                          </button>
-                        )}
-                        {req.status === 'new' && req.confirmed && (
-                          <button
-                            onClick={() => setSelectedRequest(req)}
-                            className="bg-indigo-500 text-white px-3 py-1 rounded-lg hover:bg-indigo-600 text-sm"
-                          >
-                            تعيين باحث
-                          </button>
-                        )}
-                        {req.status === 'in_progress' && (
-                          <button
-                            onClick={() => handleSendToReview(req.id)}
-                            className="bg-yellow-500 text-white px-3 py-1 rounded-lg hover:bg-yellow-600 text-sm"
-                          >
-                            إرسال للمراجعة
-                          </button>
-                        )}
-                        {req.status === 'review' && (
-                          <button
-                            onClick={() => { setSelectedRequest(req); setShowCompleteModal(true); }}
-                            className="bg-green-500 text-white px-3 py-1 rounded-lg hover:bg-green-600 text-sm"
-                          >
-                            إتمام وتسليم
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* صفحة قيد الإعداد */}
-          {currentPage === 'in-progress' && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-bold text-slate-800">الطلبات قيد الإعداد</h2>
-              {departmentRequests.filter(r => r.status === 'in_progress' || r.status === 'review').map(req => (
-                <div key={req.id} className="bg-white rounded-2xl shadow-sm p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="font-bold text-lg text-slate-800">{req.title}</h3>
-                      <p className="text-slate-500">{req.deputy} • {req.committee}</p>
-                    </div>
-                    <span className={`px-4 py-2 rounded-full text-sm text-white ${getStatusInfo(req.status).color}`}>
-                      {getStatusInfo(req.status).label}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4 mb-4 p-4 bg-slate-50 rounded-xl">
-                    <div>
-                      <p className="text-xs text-slate-500">الباحث المكلف</p>
-                      <p className="font-semibold text-slate-800">{req.researcher}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-500">تاريخ الاستلام</p>
-                      <p className="font-semibold text-slate-800">{req.dateReceived}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-500">الموعد النهائي</p>
-                      <p className="font-semibold text-slate-800">{req.deadline}</p>
-                    </div>
-                  </div>
-
-                  {/* سجل الملاحظات */}
-                  {req.notes.length > 0 && (
-                    <div className="mb-4">
-                      <p className="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                        <MessageSquare className="w-4 h-4" /> سجل التحديثات
-                      </p>
-                      <div className="space-y-2 max-h-32 overflow-y-auto">
-                        {req.notes.map((note, idx) => (
-                          <div key={idx} className="flex gap-3 text-sm">
-                            <span className="text-slate-400 whitespace-nowrap">{note.date}</span>
-                            <span className="text-slate-600">{note.text}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex gap-2 pt-4 border-t border-slate-100">
-                    {req.status === 'in_progress' && (
-                      <button
-                        onClick={() => handleSendToReview(req.id)}
-                        className="flex-1 bg-yellow-500 text-white py-2 rounded-lg hover:bg-yellow-600 transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Eye className="w-4 h-4" /> إرسال للمراجعة
-                      </button>
-                    )}
-                    {req.status === 'review' && (
-                      <button
-                        onClick={() => { setSelectedRequest(req); setShowCompleteModal(true); }}
-                        className="flex-1 bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Check className="w-4 h-4" /> إتمام وتسليم
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setSelectedRequest(req)}
-                      className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition-colors"
-                    >
-                      التفاصيل
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {departmentRequests.filter(r => r.status === 'in_progress' || r.status === 'review').length === 0 && (
-                <div className="bg-white rounded-2xl shadow-sm p-12 text-center">
-                  <Play className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                  <p className="text-slate-500">لا توجد طلبات قيد الإعداد حالياً</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* صفحة المكتملة */}
-          {currentPage === 'completed' && (
-            <div className="space-y-4">
-              <h2 className="text-xl font-bold text-slate-800">البحوث المكتملة</h2>
-              {departmentRequests.filter(r => r.status === 'completed').map(req => (
-                <div key={req.id} className="bg-white rounded-2xl shadow-sm p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-start gap-4">
-                      <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-                        <CheckCircle className="w-6 h-6 text-green-500" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-lg text-slate-800">{req.title}</h3>
-                        <p className="text-slate-500">{req.deputy} • {req.committee}</p>
-                        <p className="text-sm text-green-600 mt-1">تم التسليم: {req.completedDate}</p>
-                      </div>
-                    </div>
-                    <span className="px-4 py-2 rounded-full text-sm bg-green-100 text-green-700">
-                      مكتمل
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg hover:bg-slate-200 transition-colors flex items-center justify-center gap-2">
-                      <Eye className="w-4 h-4" /> عرض البحث
-                    </button>
-                    <button className="flex-1 bg-indigo-100 text-indigo-700 py-2 rounded-lg hover:bg-indigo-200 transition-colors flex items-center justify-center gap-2">
-                      <Upload className="w-4 h-4" /> تحميل PDF
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {departmentRequests.filter(r => r.status === 'completed').length === 0 && (
-                <div className="bg-white rounded-2xl shadow-sm p-12 text-center">
-                  <CheckCircle className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                  <p className="text-slate-500">لا توجد بحوث مكتملة بعد</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* صفحة إدارة الموظفين */}
-          {currentPage === 'staff' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-slate-800">إدارة موظفي القسم</h2>
-                  <p className="text-slate-500 text-sm mt-1">إنشاء حسابات الباحثين والمدققين وإدارة صلاحياتهم</p>
-                </div>
-                <button
-                  onClick={() => setShowAddStaffModal(true)}
-                  className="bg-indigo-500 text-white px-4 py-2 rounded-xl hover:bg-indigo-600 transition-colors flex items-center gap-2"
-                >
-                  <UserPlus className="w-5 h-5" />
-                  إضافة موظف
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {[
-                  { label: 'إجمالي الموظفين', value: myStaff.length, icon: Users, color: 'from-indigo-500 to-indigo-600' },
-                  { label: 'الباحثون', value: myResearchers.length, icon: BookOpen, color: 'from-cyan-500 to-cyan-600' },
-                  { label: 'المدققون', value: myProofreaders.length, icon: Edit, color: 'from-rose-500 to-rose-600' },
-                  { label: 'متاح حالياً', value: myStaff.filter(s => s.activeTasks === 0 && s.status === 'active').length, icon: CheckCircle, color: 'from-green-500 to-green-600' },
-                ].map((stat, idx) => (
-                  <div key={idx} className="bg-white rounded-2xl p-5 shadow-sm">
-                    <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center mb-3`}>
-                      <stat.icon className="w-6 h-6 text-white" />
-                    </div>
-                    <p className="text-3xl font-bold text-slate-800">{stat.value}</p>
-                    <p className="text-slate-500 text-sm">{stat.label}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* فلتر */}
-              <div className="flex gap-2">
-                {[{ id: 'all', label: 'الكل' }, { id: 'researcher', label: 'الباحثون' }, { id: 'proofreader', label: 'المدققون' }].map(f => (
-                  <button key={f.id} onClick={() => setStaffFilter(f.id)}
-                    className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${staffFilter === f.id ? 'bg-indigo-500 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
-                  >{f.label}</button>
-                ))}
-              </div>
-
-              <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-                <div className="divide-y divide-slate-100">
-                  {filteredStaff.length === 0 ? (
-                    <div className="px-6 py-12 text-center">
-                      <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                      <p className="text-slate-500">لا يوجد موظفون</p>
-                    </div>
-                  ) : (
-                    filteredStaff.map(member => {
-                      const roleInfo = staffRoles.find(r => r.id === member.role);
-                      return (
-                        <div key={member.id} className="px-6 py-5 hover:bg-slate-50 transition-colors">
-                          <div className="flex items-start justify-between">
-                            <div className="flex items-start gap-4">
-                              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${member.role === 'researcher' ? 'bg-cyan-100' : 'bg-rose-100'}`}>
-                                {member.role === 'researcher' ? <BookOpen className="w-6 h-6 text-cyan-500" /> : <Edit className="w-6 h-6 text-rose-500" />}
-                              </div>
-                              <div>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <p className="font-bold text-slate-800">{member.name}</p>
-                                  <span className={`px-2 py-0.5 rounded-full text-xs ${roleInfo?.color}`}>{roleInfo?.name}</span>
-                                  <span className={`px-2 py-0.5 rounded-full text-xs ${member.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                    {member.status === 'active' ? 'نشط' : 'معطّل'}
-                                  </span>
-                                </div>
-                                <p className="text-sm text-slate-500 mt-1">{member.specialization}</p>
-                                <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
-                                  <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{member.email}</span>
-                                  {member.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{member.phone}</span>}
-                                </div>
-                                <div className="flex items-center gap-1 mt-2 flex-wrap">
-                                  {member.permissions.map(p => { const perm = staffPermissions.find(sp => sp.id === p); return perm ? <span key={p} className="text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded">{perm.name}</span> : null; })}
-                                </div>
-                                <span className={`inline-block mt-2 text-xs px-2 py-1 rounded-lg ${member.activeTasks > 0 ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
-                                  {member.activeTasks > 0 ? `${member.activeTasks} مهمة نشطة` : 'متاح'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <button onClick={() => { setSelectedStaff(member); setShowPermissionsModal(true); }} className="p-2 text-purple-500 hover:bg-purple-50 rounded-lg transition-colors" title="الصلاحيات"><ClipboardCheck className="w-4 h-4" /></button>
-                              <button onClick={() => handleToggleStaffStatus(member.id)} className={`p-2 rounded-lg transition-colors ${member.status === 'active' ? 'text-orange-500 hover:bg-orange-50' : 'text-green-500 hover:bg-green-50'}`} title={member.status === 'active' ? 'تعطيل' : 'تفعيل'}>
-                                {member.status === 'active' ? <X className="w-4 h-4" /> : <Check className="w-4 h-4" />}
-                              </button>
-                              <button onClick={() => handleDeleteStaff(member.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="حذف"><Trash2 className="w-4 h-4" /></button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* نافذة إضافة موظف */}
-          {showAddStaffModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto">
-                <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-6 py-4 flex items-center justify-between sticky top-0 z-10">
-                  <h3 className="font-bold text-lg flex items-center gap-2"><UserPlus className="w-5 h-5" /> إنشاء حساب موظف جديد</h3>
-                  <button onClick={() => setShowAddStaffModal(false)} className="hover:bg-white/20 p-1 rounded"><X className="w-5 h-5" /></button>
-                </div>
-                <div className="p-6 space-y-4">
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-2">نوع الحساب *</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button onClick={() => setNewStaff({...newStaff, role: 'researcher'})}
-                        className={`p-4 rounded-xl border-2 transition-all text-center ${newStaff.role === 'researcher' ? 'border-cyan-500 bg-cyan-50' : 'border-slate-200 hover:border-cyan-300'}`}>
-                        <BookOpen className={`w-8 h-8 mx-auto mb-2 ${newStaff.role === 'researcher' ? 'text-cyan-500' : 'text-slate-400'}`} />
-                        <p className="font-bold text-slate-800">باحث</p>
-                        <p className="text-xs text-slate-500 mt-1">إعداد البحوث والدراسات</p>
-                      </button>
-                      <button onClick={() => setNewStaff({...newStaff, role: 'proofreader'})}
-                        className={`p-4 rounded-xl border-2 transition-all text-center ${newStaff.role === 'proofreader' ? 'border-rose-500 bg-rose-50' : 'border-slate-200 hover:border-rose-300'}`}>
-                        <Edit className={`w-8 h-8 mx-auto mb-2 ${newStaff.role === 'proofreader' ? 'text-rose-500' : 'text-slate-400'}`} />
-                        <p className="font-bold text-slate-800">مدقق لغوي</p>
-                        <p className="text-xs text-slate-500 mt-1">تدقيق ومراجعة البحوث</p>
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-2">الاسم الكامل *</label>
-                    <input type="text" value={newStaff.name} onChange={(e) => setNewStaff({...newStaff, name: e.target.value})}
-                      className="w-full border border-slate-300 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="أدخل الاسم الكامل" />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-2">البريد الإلكتروني *</label>
-                    <input type="email" value={newStaff.email} onChange={(e) => setNewStaff({...newStaff, email: e.target.value})}
-                      className="w-full border border-slate-300 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="example@parliament.iq" />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-2">رقم الهاتف</label>
-                    <input type="text" value={newStaff.phone} onChange={(e) => setNewStaff({...newStaff, phone: e.target.value})}
-                      className="w-full border border-slate-300 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="0770 000 0000" />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-2">التخصص *</label>
-                    <input type="text" value={newStaff.specialization} onChange={(e) => setNewStaff({...newStaff, specialization: e.target.value})}
-                      className="w-full border border-slate-300 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder={newStaff.role === 'proofreader' ? 'مثال: تدقيق لغوي عربي' : 'مثال: اقتصاد كلي، قانون دستوري...'} />
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <p className="font-semibold text-slate-700 mb-2 text-sm">الصلاحيات الافتراضية:</p>
-                    <div className="flex flex-wrap gap-1">
-                      {staffPermissions.filter(p => p.roles.includes(newStaff.role)).map(p => (
-                        <span key={p.id} className="text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{p.name}</span>
-                      ))}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-2">يمكن تعديل الصلاحيات بعد الإنشاء</p>
-                  </div>
-                  <div className="p-3 bg-indigo-50 rounded-xl border border-indigo-200">
-                    <p className="text-sm text-indigo-700 flex items-center gap-2"><Building className="w-4 h-4" /> القسم: <strong>{currentDepartment?.name}</strong></p>
-                    <p className="text-xs text-indigo-500 mt-1">كلمة المرور الافتراضية: 123456</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={handleAddStaff} className="flex-1 bg-indigo-500 text-white py-3 rounded-xl hover:bg-indigo-600 transition-colors flex items-center justify-center gap-2">
-                      <Check className="w-5 h-5" /> إنشاء الحساب
-                    </button>
-                    <button onClick={() => setShowAddStaffModal(false)} className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors">إلغاء</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* نافذة إدارة الصلاحيات */}
-          {showPermissionsModal && selectedStaff && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto">
-                <div className="bg-gradient-to-r from-purple-600 to-purple-700 text-white px-6 py-4 flex items-center justify-between sticky top-0 z-10">
-                  <h3 className="font-bold text-lg flex items-center gap-2"><ClipboardCheck className="w-5 h-5" /> صلاحيات: {selectedStaff.name}</h3>
-                  <button onClick={() => { setShowPermissionsModal(false); setSelectedStaff(null); }} className="hover:bg-white/20 p-1 rounded"><X className="w-5 h-5" /></button>
-                </div>
-                <div className="p-6">
-                  <div className="mb-4 p-3 bg-slate-50 rounded-xl flex items-center gap-3">
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${selectedStaff.role === 'researcher' ? 'bg-cyan-100' : 'bg-rose-100'}`}>
-                      {selectedStaff.role === 'researcher' ? <BookOpen className="w-5 h-5 text-cyan-500" /> : <Edit className="w-5 h-5 text-rose-500" />}
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-800">{selectedStaff.name}</p>
-                      <p className="text-sm text-slate-500">{staffRoles.find(r => r.id === selectedStaff.role)?.name} • {selectedStaff.email}</p>
-                    </div>
-                  </div>
-                  {['البحوث', 'القسم', 'التدقيق'].map(category => {
-                    const perms = staffPermissions.filter(p => p.category === category);
-                    if (perms.length === 0) return null;
-                    return (
-                      <div key={category} className="mb-4">
-                        <p className="font-semibold text-slate-600 text-sm mb-2">{category}</p>
-                        <div className="space-y-2">
-                          {perms.map(perm => {
-                            const hasIt = selectedStaff.permissions.includes(perm.id);
-                            const isApplicable = perm.roles.includes(selectedStaff.role);
-                            return (
-                              <button key={perm.id} onClick={() => isApplicable && handleTogglePermission(selectedStaff.id, perm.id)} disabled={!isApplicable}
-                                className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all text-right ${!isApplicable ? 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed' : hasIt ? 'bg-purple-50 border-purple-200' : 'bg-white border-slate-200 hover:border-purple-300'}`}>
-                                <div className="flex items-center gap-3">
-                                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${hasIt ? 'bg-purple-500 border-purple-500' : 'border-slate-300'}`}>
-                                    {hasIt && <Check className="w-3 h-3 text-white" />}
-                                  </div>
-                                  <span className={`text-sm ${hasIt ? 'text-purple-700 font-medium' : 'text-slate-600'}`}>{perm.name}</span>
-                                </div>
-                                {!isApplicable && <span className="text-xs text-slate-400">غير متاح لهذا الدور</span>}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <button onClick={() => { setShowPermissionsModal(false); setSelectedStaff(null); }}
-                    className="w-full mt-4 bg-purple-500 text-white py-3 rounded-xl hover:bg-purple-600 transition-colors flex items-center justify-center gap-2">
-                    <Check className="w-5 h-5" /> حفظ الصلاحيات
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* صفحة الإعدادات */}
-          {currentPage === 'settings' && (
-            <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100">
-                <h2 className="text-xl font-bold text-slate-800">إعدادات القسم</h2>
-              </div>
-              <div className="p-6 space-y-4">
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
-                  <div>
-                    <p className="font-semibold text-slate-800">إشعارات الطلبات الجديدة</p>
-                    <p className="text-sm text-slate-500">استلام إشعار عند ورود طلب جديد</p>
-                  </div>
-                  <button className="w-12 h-6 bg-indigo-500 rounded-full relative">
-                    <div className="w-5 h-5 bg-white rounded-full absolute left-0.5 top-0.5"></div>
-                  </button>
-                </div>
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
-                  <div>
-                    <p className="font-semibold text-slate-800">تذكير المواعيد النهائية</p>
-                    <p className="text-sm text-slate-500">تذكير قبل الموعد النهائي بأسبوع</p>
-                  </div>
-                  <button className="w-12 h-6 bg-indigo-500 rounded-full relative">
-                    <div className="w-5 h-5 bg-white rounded-full absolute left-0.5 top-0.5"></div>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </main>
+function DeptDashboard({ requests, tasks, researchers }) {
+  const stats = {
+    incoming: requests.filter((r) => r.status === 'assigned').length,
+    active: tasks.filter((t) => ['assigned', 'in_progress'].includes(t.status)).length,
+    proofread: tasks.filter((t) => t.status === 'sent_to_proofreader').length,
+    completed: tasks.filter((t) => t.status === 'completed').length,
+  }
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="طلبات واردة" value={stats.incoming} tone="warning" icon={<IconClock />} />
+        <StatCard label="قيد البحث" value={stats.active} tone="info" icon={<IconResearch />} />
+        <StatCard label="قيد التدقيق" value={stats.proofread} tone="navy" icon={<IconProofread />} />
+        <StatCard label="مكتمل" value={stats.completed} tone="success" icon={<IconCheck />} />
       </div>
 
-      {/* نافذة تفاصيل الطلب وتعيين الباحث */}
-      {selectedRequest && !showCompleteModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
-            <div className={`bg-gradient-to-r ${currentDepartment.color} text-white px-6 py-4 flex items-center justify-between`}>
-              <h3 className="font-bold text-lg">تفاصيل الطلب</h3>
-              <button onClick={() => setSelectedRequest(null)} className="hover:bg-white/20 p-1 rounded">
-                <X className="w-5 h-5" />
-              </button>
+      <div className="card">
+        <div className="card-header"><h3 className="card-title">باحثو القسم</h3></div>
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {researchers.map((r) => {
+            const active = tasks.filter((t) => t.researcher_id === r.id && !['completed', 'returned'].includes(t.status)).length
+            return (
+              <div key={r.id} className="p-4 rounded-xl border border-[var(--color-border)] flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[var(--color-navy-50)] text-[var(--color-navy-700)] flex items-center justify-center font-bold">
+                  {r.name[0]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm text-[var(--color-navy-900)] truncate">{r.name}</p>
+                  <p className="text-xs text-[var(--color-navy-500)]">{r.specialization || 'باحث'}</p>
+                </div>
+                <div className="text-left">
+                  <p className="text-lg font-bold text-[var(--color-gold-700)]">{active}</p>
+                  <p className="text-[10px] text-[var(--color-navy-500)]">مهمة نشطة</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RequestsTable({ rows, onOpen, emptyText }) {
+  if (rows.length === 0) return <div className="card"><EmptyState title={emptyText} /></div>
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>الرقم</th>
+            <th>العنوان</th>
+            <th>النائب</th>
+            <th>تاريخ الإحالة</th>
+            <th>الحالة</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer">
+              <td className="font-mono text-xs" dir="ltr">{r.id}</td>
+              <td className="font-semibold max-w-md truncate">{r.title}</td>
+              <td className="text-sm">{r.deputy_name}</td>
+              <td className="text-xs">{formatDate(r.referral_date || r.date_received)}</td>
+              <td><StatusBadge status={r.status} /></td>
+              <td><button className="btn-ghost btn-sm">إجراء</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ResearchTasksTable({ rows, onOpen }) {
+  const [search, setSearch] = useState('')
+  const filtered = rows.filter((r) => !search || r.request_title?.toLowerCase().includes(search.toLowerCase()))
+  if (rows.length === 0) return <div className="card"><EmptyState title="لا توجد مهام بحث" /></div>
+  return (
+    <div className="space-y-4">
+      <div className="card p-4">
+        <div className="relative">
+          <IconSearch className="w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-navy-400)]" />
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ابحث..." className="input input-with-icon" />
+        </div>
+      </div>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>رقم المهمة</th>
+              <th>عنوان البحث</th>
+              <th>الباحث</th>
+              <th>تاريخ التعيين</th>
+              <th>الموعد النهائي</th>
+              <th>الحالة</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((t) => (
+              <tr key={t.id} onClick={() => onOpen(t)} className="cursor-pointer">
+                <td className="font-mono text-xs" dir="ltr">{t.id}</td>
+                <td className="font-semibold max-w-xs truncate">{t.request_title}</td>
+                <td className="text-sm">{t.researcher_name}</td>
+                <td className="text-xs">{formatDate(t.date_assigned)}</td>
+                <td className="text-xs">{formatDate(t.deadline)}</td>
+                <td><StatusBadge status={t.status} /></td>
+                <td><button className="btn-ghost btn-sm">عرض</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function TeamView({ researchers }) {
+  if (researchers.length === 0) return <div className="card"><EmptyState title="لا يوجد أعضاء بعد" description="اضغط 'إضافة عضو' لإنشاء حساب جديد" /></div>
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {researchers.map((r) => (
+        <div key={r.id} className="card p-5 card-hover">
+          <div className="flex items-start gap-3">
+            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[var(--color-navy-600)] to-[var(--color-navy-800)] text-white flex items-center justify-center font-bold">
+              {r.name[0]}
             </div>
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-80px)]">
-              <div className="mb-6">
-                <h4 className="font-bold text-xl text-slate-800 mb-2">{selectedRequest.title}</h4>
-                <div className="flex items-center gap-4 text-sm text-slate-500">
-                  <span>{selectedRequest.id}</span>
-                  <span className={`px-2 py-1 rounded ${getStatusInfo(selectedRequest.status).bgLight}`}>
-                    {getStatusInfo(selectedRequest.status).label}
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="p-4 bg-slate-50 rounded-xl">
-                  <p className="text-xs text-slate-500 mb-1">مقدم الطلب</p>
-                  <p className="font-semibold text-slate-800">{selectedRequest.deputy}</p>
-                  <p className="text-sm text-slate-500">{selectedRequest.committee}</p>
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl">
-                  <p className="text-xs text-slate-500 mb-1">معلومات التواصل</p>
-                  <p className="text-sm text-slate-800">{selectedRequest.phone}</p>
-                  <p className="text-sm text-slate-800">{selectedRequest.email}</p>
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl">
-                  <p className="text-xs text-slate-500 mb-1">الغرض</p>
-                  <p className="font-semibold text-slate-800">{selectedRequest.purpose}</p>
-                </div>
-                <div className="p-4 bg-slate-50 rounded-xl">
-                  <p className="text-xs text-slate-500 mb-1">الموعد النهائي</p>
-                  <p className="font-semibold text-slate-800">{selectedRequest.deadline}</p>
-                </div>
-              </div>
-
-              <div className="mb-6 p-4 bg-slate-50 rounded-xl">
-                <p className="text-xs text-slate-500 mb-1">تفاصيل الطلب</p>
-                <p className="text-slate-800">{selectedRequest.description}</p>
-              </div>
-
-              {/* سجل الملاحظات */}
-              {selectedRequest.notes.length > 0 && (
-                <div className="mb-6">
-                  <p className="font-semibold text-slate-700 mb-2">سجل التحديثات</p>
-                  <div className="space-y-2 p-4 bg-slate-50 rounded-xl max-h-40 overflow-y-auto">
-                    {selectedRequest.notes.map((note, idx) => (
-                      <div key={idx} className="flex gap-3 text-sm border-b border-slate-200 pb-2 last:border-0">
-                        <span className="text-slate-400 whitespace-nowrap">{note.date}</span>
-                        <span className="text-slate-600">{note.text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* تعيين باحث للطلبات الجديدة */}
-              {selectedRequest.status === 'new' && (
-                <div className="border-t border-slate-200 pt-6">
-                  <p className="font-semibold text-slate-700 mb-3">تعيين باحث للعمل على الطلب:</p>
-                  <div className="space-y-2">
-                    {researchers.filter(r => r.department === loginData.department).map(researcher => (
-                      <button
-                        key={researcher.id}
-                        onClick={() => handleStartWork(selectedRequest.id, researcher.id)}
-                        className="w-full text-right p-4 border border-slate-200 rounded-xl hover:border-indigo-500 hover:bg-indigo-50 transition-all flex items-center justify-between"
-                      >
-                        <div>
-                          <p className="font-semibold text-slate-800">{researcher.name}</p>
-                          <p className="text-sm text-slate-500">التخصص: {researcher.specialization}</p>
-                        </div>
-                        <Play className="w-5 h-5 text-indigo-500" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* أزرار الإجراءات */}
-              <div className="flex gap-2 mt-6">
-                {selectedRequest.status === 'in_progress' && (
-                  <button
-                    onClick={() => { handleSendToReview(selectedRequest.id); setSelectedRequest(null); }}
-                    className="flex-1 bg-yellow-500 text-white py-3 rounded-xl hover:bg-yellow-600 transition-colors"
-                  >
-                    إرسال للمراجعة
-                  </button>
-                )}
-                {selectedRequest.status === 'review' && (
-                  <button
-                    onClick={() => setShowCompleteModal(true)}
-                    className="flex-1 bg-green-500 text-white py-3 rounded-xl hover:bg-green-600 transition-colors"
-                  >
-                    إتمام وتسليم
-                  </button>
-                )}
-                <button
-                  onClick={() => setSelectedRequest(null)}
-                  className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors"
-                >
-                  إغلاق
-                </button>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-bold text-[var(--color-navy-900)] truncate">{r.name}</h4>
+              <p className="text-xs text-[var(--color-navy-500)] mt-0.5">{r.specialization || '—'}</p>
+              <p className="text-xs text-[var(--color-navy-400)] font-mono mt-1" dir="ltr">{r.email}</p>
+              <div className="mt-2">
+                <span className={`badge ${r.status === 'active' ? 'badge-success' : 'badge-neutral'}`}>
+                  {r.status === 'active' ? 'نشط' : 'غير نشط'}
+                </span>
               </div>
             </div>
           </div>
         </div>
-      )}
+      ))}
+    </div>
+  )
+}
 
-      {/* نافذة إتمام الطلب */}
-      {showCompleteModal && selectedRequest && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden">
-            <div className="bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-4">
-              <h3 className="font-bold text-lg">إتمام وتسليم البحث</h3>
+function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onChanged }) {
+  const [detail, setDetail] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [serviceType, setServiceType] = useState(SERVICE_TYPES[0])
+  const [classification, setClassification] = useState(CLASSIFICATIONS[0])
+  const [days, setDays] = useState(30)
+  const [selectedResearchers, setSelectedResearchers] = useState([])
+  const [busy, setBusy] = useState(false)
+  // مراجعة رئيس القسم
+  const [reviewDecision, setReviewDecision] = useState('approve')
+  const [reviewNotes, setReviewNotes] = useState('')
+  const [reviewProofreader, setReviewProofreader] = useState('')
+  const toast = useToast()
+
+  useEffect(() => {
+    if (!request) { setDetail(null); return }
+    setLoading(true)
+    setSelectedResearchers([])
+    setReviewNotes('')
+    setReviewProofreader('')
+    api.getRequest(request.id).then((r) => { if (r.success) setDetail(r.data) }).catch(() => {}).finally(() => setLoading(false))
+  }, [request])
+
+  if (!request) return null
+  const d = detail || request
+
+  const toggleResearcher = (id) => {
+    setSelectedResearchers((prev) =>
+      prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]
+    )
+  }
+
+  const confirm = async () => {
+    if (selectedResearchers.length === 0) return toast.error('اختر باحثاً واحداً على الأقل')
+    setBusy(true)
+    try {
+      await api.confirmRequest(d.id, {
+        service_type: serviceType,
+        classification,
+        completion_days: parseInt(days),
+        researcher_ids: selectedResearchers,
+      })
+      toast.success(selectedResearchers.length > 1 ? `تم تعيين ${selectedResearchers.length} باحثين` : 'تم التأكيد والتعيين')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  const submitDeptReview = async () => {
+    if (reviewDecision === 'approve' && !reviewProofreader) {
+      return toast.error('اختر المدقق اللغوي')
+    }
+    setBusy(true)
+    try {
+      await api.deptHeadReview(d.id, reviewDecision, parseInt(reviewProofreader) || 0, reviewNotes)
+      toast.success('تم تسجيل القرار')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  const sendToDeputy = async () => {
+    if (!confirm) return
+    setBusy(true)
+    try {
+      await api.deptSendToDeputy(d.id)
+      toast.success('تم إرسال البحث للنائب')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open={!!request} onClose={onClose} title={`الطلب ${request.id}`} size="lg">
+      {loading ? <PageLoader /> : (
+        <div className="space-y-5">
+          <div>
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <h3 className="text-lg font-bold text-[var(--color-navy-900)]">{d.title}</h3>
+              <StatusBadge status={d.status} />
             </div>
-            <div className="p-6">
-              <p className="text-slate-600 mb-4">
-                أنت على وشك تسليم البحث: <strong>{selectedRequest.title}</strong>
-              </p>
+            <p className="text-sm text-[var(--color-navy-600)]">{d.description}</p>
+          </div>
 
-              <div className="mb-4">
-                <label className="block text-slate-700 font-semibold mb-2">ملاحظات التسليم (اختياري)</label>
-                <textarea
-                  value={completionNote}
-                  onChange={(e) => setCompletionNote(e.target.value)}
-                  className="w-full border border-slate-300 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-green-500 h-24 resize-none"
-                  placeholder="أضف أي ملاحظات حول البحث المكتمل..."
-                />
+          {d.status === 'assigned' && (
+            <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
+              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">تأكيد الطلب وتعيين الباحث/الباحثين</h4>
+              <p className="text-xs text-[var(--color-navy-600)] mb-3">يمكن تعيين أكثر من باحث للعمل على نفس الطلب</p>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="label label-required">نوع الخدمة</label>
+                  <select className="select" value={serviceType} onChange={(e) => setServiceType(e.target.value)}>
+                    {SERVICE_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="label label-required">التصنيف</label>
+                  <select className="select" value={classification} onChange={(e) => setClassification(e.target.value)}>
+                    {CLASSIFICATIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="label label-required">مدة الإنجاز (أيام)</label>
+                  <input type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} className="input" />
+                </div>
               </div>
+              <label className="label label-required">الباحث/الباحثون</label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 max-h-56 overflow-y-auto">
+                {researchers.map((r) => {
+                  const checked = selectedResearchers.includes(r.id)
+                  return (
+                    <label key={r.id} className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition ${
+                      checked ? 'border-[var(--color-gold-500)] bg-white' : 'border-[var(--color-border)] bg-white/50 hover:bg-white'
+                    }`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleResearcher(r.id)} className="w-4 h-4" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate">{r.name}</p>
+                        <p className="text-[10px] text-[var(--color-navy-500)]">{r.specialization || 'باحث'}</p>
+                      </div>
+                    </label>
+                  )
+                })}
+              </div>
+              <button onClick={confirm} disabled={busy || selectedResearchers.length === 0} className="btn-primary w-full">
+                {busy ? 'جاري...' : `تأكيد وتعيين ${selectedResearchers.length > 0 ? `(${selectedResearchers.length})` : ''}`}
+              </button>
+            </div>
+          )}
 
-              <div className="mb-6 p-4 bg-green-50 rounded-xl">
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" className="w-5 h-5 rounded text-green-500" />
-                  <span className="text-sm text-slate-700">تم رفع ملف البحث بصيغة PDF</span>
+          {/* مراجعة رئيس القسم للبحث المسلَّم (workflow جديد) */}
+          {d.status === 'pending_dept_review' && (
+            <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
+              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">مراجعة البحث المسلَّم</h4>
+              <p className="text-xs text-[var(--color-navy-600)] mb-3">الباحث سلّم البحث — قرر إن كان جاهزاً للتدقيق اللغوي أو يحتاج تعديل</p>
+              <div className="flex gap-2 mb-3">
+                <label className={`flex-1 cursor-pointer p-3 rounded-lg border-2 ${reviewDecision === 'approve' ? 'border-[var(--color-success-600)] bg-emerald-50' : 'border-[var(--color-border)] bg-white'}`}>
+                  <input type="radio" name="dr" value="approve" checked={reviewDecision === 'approve'} onChange={(e) => setReviewDecision(e.target.value)} className="sr-only" />
+                  <span className="font-semibold text-sm">✓ اعتماد + إرسال للتدقيق</span>
+                </label>
+                <label className={`flex-1 cursor-pointer p-3 rounded-lg border-2 ${reviewDecision === 'reject' ? 'border-[var(--color-danger-600)] bg-red-50' : 'border-[var(--color-border)] bg-white'}`}>
+                  <input type="radio" name="dr" value="reject" checked={reviewDecision === 'reject'} onChange={(e) => setReviewDecision(e.target.value)} className="sr-only" />
+                  <span className="font-semibold text-sm">✗ رفض وإرجاع للباحث</span>
                 </label>
               </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleCompleteRequest(selectedRequest.id)}
-                  className="flex-1 bg-green-500 text-white py-3 rounded-xl hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Check className="w-5 h-5" />
-                  تأكيد التسليم
-                </button>
-                <button
-                  onClick={() => { setShowCompleteModal(false); setCompletionNote(''); }}
-                  className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* نافذة تأكيد الطلب */}
-      {showConfirmModal && confirmRequest && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden">
-            <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-white px-6 py-4 flex items-center justify-between">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <ClipboardCheck className="w-5 h-5" />
-                تأكيد الطلب
-              </h3>
-              <button onClick={() => setShowConfirmModal(false)} className="hover:bg-white/20 p-1 rounded">
-                <X className="w-5 h-5" />
+              {reviewDecision === 'approve' && (
+                <div className="mb-3">
+                  <label className="label label-required">المدقق اللغوي</label>
+                  <select className="select" value={reviewProofreader} onChange={(e) => setReviewProofreader(e.target.value)}>
+                    <option value="">اختر المدقق...</option>
+                    {proofreaders?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+              )}
+              <textarea className="textarea mb-3" rows={2} value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} placeholder="ملاحظات (اختياري)" />
+              <button onClick={submitDeptReview} disabled={busy} className={reviewDecision === 'approve' ? 'btn-success w-full' : 'btn-danger w-full'}>
+                {busy ? 'جاري...' : 'تأكيد القرار'}
               </button>
             </div>
-            <div className="p-6">
-              <div className="mb-4 p-4 bg-slate-50 rounded-xl">
-                <p className="text-sm text-slate-500 mb-1">الطلب</p>
-                <p className="font-bold text-slate-800">{confirmRequest.title}</p>
-                <p className="text-sm text-slate-500 mt-1">{confirmRequest.deputy}</p>
-              </div>
+          )}
 
-              {/* نوع الخدمة */}
-              <div className="mb-4">
-                <label className="block text-slate-700 font-semibold mb-2">نوع الخدمة</label>
-                <select
-                  value={confirmData.serviceType}
-                  onChange={(e) => setConfirmData({...confirmData, serviceType: e.target.value})}
-                  className="w-full border border-slate-300 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">اختر نوع الخدمة</option>
-                  {serviceTypes.map(type => (
-                    <option key={type.id} value={type.id}>{type.name}</option>
-                  ))}
-                </select>
-              </div>
+          {/* إرسال للنائب بعد اعتماد المعاون */}
+          {d.status === 'pending_dept_send' && (
+            <div className="card p-4 bg-emerald-50 border-emerald-200">
+              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">إرسال البحث للنائب</h4>
+              <p className="text-xs text-[var(--color-navy-600)] mb-3">
+                المعاون اعتمد البحث نهائياً. يرجى إرساله للنائب طالب الخدمة.
+              </p>
+              <button onClick={sendToDeputy} disabled={busy} className="btn-success w-full">
+                <IconCheck className="w-4 h-4" />
+                <span>{busy ? 'جاري الإرسال...' : 'إرسال للنائب'}</span>
+              </button>
+            </div>
+          )}
 
-              {/* تصنيف الخدمة البحثية */}
-              <div className="mb-4">
-                <label className="block text-slate-700 font-semibold mb-2">تصنيف الخدمة البحثية</label>
-                <select
-                  value={confirmData.classification}
-                  onChange={(e) => setConfirmData({...confirmData, classification: e.target.value})}
-                  className="w-full border border-slate-300 rounded-xl py-3 px-4 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  <option value="">اختر التصنيف</option>
-                  {classifications.map(cls => (
-                    <option key={cls.id} value={cls.id}>{cls.name}</option>
-                  ))}
-                </select>
-              </div>
+          <div className="grid grid-cols-2 gap-4 p-4 bg-[var(--color-surface-soft)] rounded-xl">
+            <Field label="النائب" value={d.deputy_name} />
+            <Field label="اللجنة" value={d.committee} />
+            <Field label="تاريخ التقديم" value={formatDate(d.date_received)} />
+            <Field label="تاريخ الإحالة" value={formatDate(d.referral_date)} />
+          </div>
 
-              {/* تاريخ الإحالة */}
-              <div className="mb-4">
-                <label className="block text-slate-700 font-semibold mb-2">تاريخ الإحالة إلى الباحث</label>
-                <div className="flex items-center gap-2 p-3 bg-slate-100 rounded-xl">
-                  <Calendar className="w-5 h-5 text-slate-500" />
-                  <span className="text-slate-800">{new Date().toLocaleDateString('ar-IQ', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                  <span className="text-xs text-slate-500 mr-auto">(تاريخ النظام)</span>
-                </div>
-              </div>
-
-              {/* مدة الإنجاز */}
-              <div className="mb-6">
-                <label className="block text-slate-700 font-semibold mb-2">مدة الإنجاز (بالأيام)</label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    value={confirmData.completionDays}
-                    onChange={(e) => setConfirmData({...confirmData, completionDays: parseInt(e.target.value) || 30})}
-                    min="1"
-                    max="365"
-                    className="w-24 border border-slate-300 rounded-xl py-3 px-4 text-center focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                  <span className="text-slate-600">يوم</span>
-                  <div className="mr-auto flex gap-2">
-                    {[7, 14, 30, 60].map(days => (
-                      <button
-                        key={days}
-                        onClick={() => setConfirmData({...confirmData, completionDays: days})}
-                        className={`px-3 py-1 rounded-lg text-sm transition-colors ${
-                          confirmData.completionDays === days
-                            ? 'bg-amber-500 text-white'
-                            : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
-                        }`}
-                      >
-                        {days}
-                      </button>
-                    ))}
+          {d.notes && d.notes.length > 0 && (
+            <div>
+              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-800)]">الملاحظات</h4>
+              <div className="space-y-2">
+                {d.notes.map((n) => (
+                  <div key={n.id} className="p-3 bg-[var(--color-surface-soft)] rounded-lg border border-[var(--color-border)]">
+                    <div className="flex justify-between gap-2 mb-1">
+                      <span className="font-semibold text-sm">{n.user_name}</span>
+                      <span className="text-[10px] text-[var(--color-navy-500)]">{formatDateTime(n.created_at)}</span>
+                    </div>
+                    <p className="text-sm text-[var(--color-navy-700)]">{n.content}</p>
                   </div>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleConfirmRequest}
-                  className="flex-1 bg-amber-500 text-white py-3 rounded-xl hover:bg-amber-600 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Check className="w-5 h-5" />
-                  تأكيد
-                </button>
-                <button
-                  onClick={() => setShowConfirmModal(false)}
-                  className="px-6 py-3 bg-slate-200 text-slate-700 rounded-xl hover:bg-slate-300 transition-colors"
-                >
-                  إلغاء
-                </button>
+                ))}
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
+    </Modal>
+  )
+}
+
+function ResearchTaskModal({ task, proofreaders, onClose, onChanged }) {
+  const [proofId, setProofId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => { setProofId('') }, [task])
+  if (!task) return null
+
+  const sendToProofreading = async () => {
+    if (!proofId) return toast.error('اختر المدقق')
+    setBusy(true)
+    try {
+      await api.createProofreadingTask({ research_task_id: task.id, proofreader_id: parseInt(proofId) })
+      toast.success('تم إرسال البحث للتدقيق')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal open={!!task} onClose={onClose} title={`المهمة ${task.id}`} size="md">
+      <div className="space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-lg font-bold text-[var(--color-navy-900)]">{task.request_title}</h3>
+          <StatusBadge status={task.status} />
+        </div>
+        <div className="grid grid-cols-2 gap-3 p-4 bg-[var(--color-surface-soft)] rounded-xl">
+          <Field label="الباحث" value={task.researcher_name} />
+          <Field label="تاريخ التعيين" value={formatDate(task.date_assigned)} />
+          <Field label="الموعد النهائي" value={formatDate(task.deadline)} />
+          <Field label="مدة الإنجاز" value={`${task.completion_days || 0} يوم`} />
+        </div>
+
+        {task.status === 'submitted' && (
+          <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
+            <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">إرسال للتدقيق اللغوي</h4>
+            <div className="space-y-3">
+              <select className="select" value={proofId} onChange={(e) => setProofId(e.target.value)}>
+                <option value="">اختر المدقق...</option>
+                {proofreaders.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <button onClick={sendToProofreading} disabled={busy || !proofId} className="btn-primary w-full">
+                {busy ? 'جاري...' : 'إرسال للتدقيق'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+function CreateUserModal({ open, onClose, onCreated }) {
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole] = useState('researcher')
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => {
+    if (open) { setName(''); setEmail(''); setPassword(''); setRole('researcher') }
+  }, [open])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (password.length < 6) return toast.error('كلمة المرور يجب أن تكون 6 أحرف على الأقل')
+    setBusy(true)
+    try {
+      await api.createUser({ name, email, password, role })
+      onCreated()
+    } catch (err) { toast.error(err.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="إضافة عضو جديد للقسم"
+      size="sm"
+      footer={
+        <>
+          <button onClick={onClose} className="btn-outline">إلغاء</button>
+          <button form="cu-form" type="submit" disabled={busy} className="btn-gold">{busy ? 'جاري...' : 'إنشاء'}</button>
+        </>
+      }
+    >
+      <form id="cu-form" onSubmit={submit} className="space-y-4">
+        <div className="form-group">
+          <label className="label label-required">الاسم الكامل</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} required className="input" />
+        </div>
+        <div className="form-group">
+          <label className="label label-required">البريد الإلكتروني</label>
+          <input type="email" dir="ltr" value={email} onChange={(e) => setEmail(e.target.value)} required className="input text-right" />
+        </div>
+        <div className="form-group">
+          <label className="label label-required">كلمة المرور الأولية</label>
+          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className="input" />
+          <p className="form-hint">يمكن للمستخدم تغييرها لاحقاً</p>
+        </div>
+        <div className="form-group">
+          <label className="label label-required">الدور</label>
+          <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="researcher">باحث</option>
+            <option value="proofreader">مدقق لغوي</option>
+          </select>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function Field({ label, value }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-wider text-[var(--color-navy-500)] font-semibold mb-0.5">{label}</p>
+      <p className="text-sm font-medium text-[var(--color-navy-900)]">{value || '—'}</p>
     </div>
-  );
+  )
 }

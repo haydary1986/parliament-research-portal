@@ -17,6 +17,7 @@ func main() {
 	}
 
 	middleware.InitJWT()
+	middleware.StartBlacklistCleanup()
 
 	if err := db.Init(dbPath); err != nil {
 		log.Fatal(err)
@@ -60,12 +61,24 @@ func main() {
 	mux.Handle("POST /api/requests", role("deputy")(http.HandlerFunc(handlers.CreateRequest)))
 	// إحالة لقسم: المدير فقط
 	mux.Handle("PUT /api/requests/{id}/assign", role("manager")(http.HandlerFunc(handlers.AssignRequest)))
-	// تأكيد وتعيين باحث: رئيس القسم فقط
+	// تأكيد وتعيين باحث(ين): رئيس القسم فقط
 	mux.Handle("PUT /api/requests/{id}/confirm", role("department_head")(http.HandlerFunc(handlers.ConfirmRequest)))
 	// إرجاع الطلب (بحث موجود): المدير فقط
 	mux.Handle("PUT /api/requests/{id}/return", role("manager")(http.HandlerFunc(handlers.ReturnRequest)))
-	// المراجعة النهائية واعتماد البحث: المدير فقط
+	// المراجعة النهائية واعتماد البحث (القديم - للحفاظ على التوافق): المدير فقط
 	mux.Handle("PUT /api/requests/{id}/final-review", role("manager")(http.HandlerFunc(handlers.FinalReviewRequest)))
+
+	// =============================================
+	// Workflow الجديد (req.md)
+	// =============================================
+	// رئيس القسم يراجع البحث المسلَّم قبل إرساله للتدقيق اللغوي
+	mux.Handle("PUT /api/requests/{id}/dept-review", role("department_head")(http.HandlerFunc(handlers.DeptHeadReviewSubmission)))
+	// المعاون يدقق نهائياً
+	mux.Handle("PUT /api/requests/{id}/assistant-review", role("assistant_manager")(http.HandlerFunc(handlers.AssistantFinalReview)))
+	// رئيس القسم يرسل البحث للنائب طالب الخدمة
+	mux.Handle("PUT /api/requests/{id}/dept-send", role("department_head")(http.HandlerFunc(handlers.DeptHeadSendToDeputy)))
+	// الباحث يحيل البحث للمعاون للتدقيق النهائي
+	mux.Handle("PUT /api/research-tasks/{id}/refer-assistant", role("researcher")(http.HandlerFunc(handlers.ReferToAssistant)))
 
 	// =============================================
 	// المستخدمين - Users
@@ -87,8 +100,8 @@ func main() {
 	// =============================================
 	// المهام البحثية - Research Tasks
 	// =============================================
-	mux.Handle("GET /api/research-tasks", role("researcher", "department_head", "manager", "admin")(http.HandlerFunc(handlers.GetResearchTasks)))
-	mux.Handle("GET /api/research-tasks/{id}", role("researcher", "department_head", "manager", "admin")(http.HandlerFunc(handlers.GetResearchTask)))
+	mux.Handle("GET /api/research-tasks", role("researcher", "department_head", "manager", "assistant_manager", "admin")(http.HandlerFunc(handlers.GetResearchTasks)))
+	mux.Handle("GET /api/research-tasks/{id}", role("researcher", "department_head", "manager", "assistant_manager", "admin")(http.HandlerFunc(handlers.GetResearchTask)))
 	mux.Handle("PUT /api/research-tasks/{id}/status", role("researcher", "department_head")(http.HandlerFunc(handlers.UpdateResearchTaskStatus)))
 	mux.Handle("POST /api/research-tasks/{id}/info-requests", role("researcher")(http.HandlerFunc(handlers.CreateInfoRequest)))
 	// تحديث رد الجهة على كتاب المعلومات

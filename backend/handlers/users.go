@@ -117,6 +117,8 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		Password     string   `json:"password"`
 		Role         string   `json:"role"`
 		DepartmentID *string  `json:"department_id"`
+		Committee    *string  `json:"committee"` // للنواب
+		Phone        *string  `json:"phone"`     // للنواب (لإرسال SMS)
 		Permissions  []string `json:"permissions"`
 	}
 
@@ -135,7 +137,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validRoles := map[string]bool{"deputy": true, "manager": true, "department_head": true, "researcher": true, "proofreader": true, "admin": true}
+	validRoles := map[string]bool{"deputy": true, "manager": true, "department_head": true, "researcher": true, "proofreader": true, "assistant_manager": true, "admin": true}
 	if !validRoles[input.Role] {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{
 			Success: false, Message: "الدور غير صالح",
@@ -174,9 +176,10 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	passwordHash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
 	result, err := db.DB.Exec(`
-		INSERT INTO users (name, email, password_hash, role, department_id, status)
-		VALUES (?, ?, ?, ?, ?, 'active')
-	`, sanitize(input.Name), sanitize(input.Email), passwordHash, input.Role, input.DepartmentID)
+		INSERT INTO users (name, email, password_hash, role, department_id, committee, phone, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+	`, sanitize(input.Name), sanitize(input.Email), passwordHash, input.Role,
+		input.DepartmentID, sanitizePtr(input.Committee), sanitizePtr(input.Phone))
 
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{
