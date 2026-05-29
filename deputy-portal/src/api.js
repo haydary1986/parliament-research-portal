@@ -100,6 +100,13 @@ export function adminResetPassword(id, newPassword) {
   return request('PUT', `/users/${id}/reset-password`, { new_password: newPassword });
 }
 
+// إنشاء عدة مستخدمين دفعة واحدة (admin only)
+// users: [{name, email?, phone?, role?, committees?, deputy_id?}]
+// returns: [{name, email, password, success, user_id?, error?}]
+export function bulkCreateUsers(users) {
+  return request('POST', '/users/bulk', { users });
+}
+
 // ========== Departments ==========
 export function getDepartments() {
   return request('GET', '/departments');

@@ -12,6 +12,8 @@ import {
 import { formatDate, formatDateTime, ROLE_LABELS } from './lib/format'
 import { COMMITTEES } from './lib/committees'
 import * as api from './api'
+import * as XLSX from 'xlsx'
+import { saveAs } from 'file-saver'
 
 export default function SuperAdminPortal({ user, onLogout }) {
   const [tab, setTab] = useState('dashboard')
@@ -22,6 +24,7 @@ export default function SuperAdminPortal({ user, onLogout }) {
   const [security, setSecurity] = useState(null)
   const [loading, setLoading] = useState(true)
   const [createOpen, setCreateOpen] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
   const toast = useToast()
 
   const refresh = async () => {
@@ -71,10 +74,16 @@ export default function SuperAdminPortal({ user, onLogout }) {
       title={meta[tab].title}
       subtitle={meta[tab].subtitle}
       actions={tab === 'users' && (
-        <button onClick={() => setCreateOpen(true)} className="btn-gold">
-          <IconPlus className="w-4 h-4" />
-          <span>مستخدم جديد</span>
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setBulkOpen(true)} className="btn-outline">
+            <span>📥</span>
+            <span>استيراد من Excel</span>
+          </button>
+          <button onClick={() => setCreateOpen(true)} className="btn-gold">
+            <IconPlus className="w-4 h-4" />
+            <span>مستخدم جديد</span>
+          </button>
+        </div>
       )}
     >
       {loading ? <PageLoader /> : (
@@ -92,6 +101,12 @@ export default function SuperAdminPortal({ user, onLogout }) {
         departments={departments}
         onClose={() => setCreateOpen(false)}
         onCreated={() => { setCreateOpen(false); refresh(); toast.success('تم إنشاء المستخدم') }}
+      />
+
+      <BulkImportModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        onDone={() => { setBulkOpen(false); refresh() }}
       />
     </PortalLayout>
   )
@@ -358,6 +373,278 @@ function SecurityView({ security }) {
   )
 }
 
+function BulkImportModal({ open, onClose, onDone }) {
+  const [step, setStep] = useState('upload') // upload | preview | done
+  const [rows, setRows] = useState([])
+  const [results, setResults] = useState([])
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => {
+    if (open) { setStep('upload'); setRows([]); setResults([]) }
+  }, [open])
+
+  // قراءة ملف Excel - أعمدة متوقعة:
+  // A: الاسم، B: البريد (اختياري)، C: الموبايل، D: الرقم النيابي، E+: لجان (متعددة)
+  const onFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf)
+      const sheet = wb.Sheets[wb.SheetNames[0]]
+      const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+
+      // أول صف ربما يكون header - نتحقق
+      const firstRow = (raw[0] || []).map((c) => String(c).trim())
+      const hasHeader = firstRow.some((c) => /اسم|بريد|name|email/i.test(c))
+      const dataRows = hasHeader ? raw.slice(1) : raw
+
+      const parsed = dataRows
+        .filter((r) => r.some((c) => String(c).trim()))
+        .map((r) => {
+          const cells = r.map((c) => String(c).trim())
+          const name = cells[0] || ''
+          const email = cells[1] || ''
+          const phone = cells[2] || ''
+          const deputyId = cells[3] || ''
+          // باقي الخانات: لجان (قد تكون مفصولة بفاصلة أيضاً)
+          let committees = []
+          for (let i = 4; i < cells.length; i++) {
+            const v = cells[i]
+            if (!v) continue
+            v.split(/[,،;\n]/).forEach((c) => {
+              const t = c.trim()
+              if (t && COMMITTEES.includes(t)) committees.push(t)
+              else if (t && t !== 'أخرى') committees.push(t) // نقبل غير الرسمية أيضاً
+            })
+          }
+          // إذا كان عمود اللجان مفصولاً بفاصلة في خانة واحدة
+          if (committees.length === 0 && cells[4]) {
+            committees = cells[4].split(/[,،;\n]/).map((c) => c.trim()).filter(Boolean)
+          }
+          return { name, email, phone, deputy_id: deputyId, role: 'deputy', committees }
+        })
+        .filter((r) => r.name)
+
+      if (parsed.length === 0) {
+        toast.error('لا توجد بيانات صالحة في الملف')
+        return
+      }
+      setRows(parsed)
+      setStep('preview')
+    } catch (err) {
+      toast.error('فشل قراءة الملف: ' + err.message)
+    }
+  }
+
+  const downloadTemplate = () => {
+    const headers = ['الاسم', 'البريد (اختياري)', 'الموبايل', 'الرقم النيابي', 'اللجان (مفصولة بفاصلة)']
+    const sample = [
+      ['د. علي محمد', 'ali.m@parliament.iq', '07701112233', 'DEP-100', 'اللجنة المالية، لجنة النزاهة'],
+      ['أ. فاطمة حسين', '', '07702223344', '', 'لجنة التربية'],
+    ]
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...sample])
+    ws['!cols'] = [{ wch: 25 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 50 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'نواب')
+    XLSX.writeFile(wb, 'قالب_استيراد_النواب.xlsx')
+  }
+
+  const submit = async () => {
+    setBusy(true)
+    try {
+      const r = await api.bulkCreateUsers(rows.map((u) => ({
+        name: u.name,
+        email: u.email || undefined,
+        phone: u.phone || undefined,
+        deputy_id: u.deputy_id || undefined,
+        role: u.role,
+        committees: u.committees,
+      })))
+      if (r.success) {
+        setResults(r.data || [])
+        setStep('done')
+        toast.success(r.message)
+      } else {
+        toast.error(r.message)
+      }
+    } catch (err) { toast.error(err.message) }
+    finally { setBusy(false) }
+  }
+
+  const downloadCredentials = () => {
+    // CSV بأسماء وبريد وكلمات مرور للمشاركة الآمنة
+    const headers = ['الاسم', 'البريد', 'كلمة المرور', 'الحالة', 'ملاحظة']
+    const rowsCsv = results.map((r) => [
+      r.name,
+      r.email || '',
+      r.password || '',
+      r.success ? 'تم الإنشاء' : 'فشل',
+      r.error || ''
+    ])
+    const csv = [headers, ...rowsCsv]
+      .map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    // BOM لدعم العربية في Excel
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+    const date = new Date().toISOString().slice(0, 10)
+    saveAs(blob, `حسابات_النواب_${date}.csv`)
+  }
+
+  if (!open) return null
+
+  return (
+    <Modal
+      open={open}
+      onClose={() => { if (step === 'done') onDone?.(); onClose() }}
+      title={step === 'upload' ? 'استيراد حسابات النواب من Excel' : step === 'preview' ? `معاينة (${rows.length} نائب)` : `النتائج (${results.filter((r) => r.success).length} ناجح)`}
+      size="xl"
+      footer={
+        <>
+          {step === 'preview' && (
+            <>
+              <button onClick={() => setStep('upload')} className="btn-outline">رجوع</button>
+              <button onClick={submit} disabled={busy || rows.length === 0} className="btn-gold">
+                {busy ? `جاري الإنشاء... (${rows.length})` : `إنشاء ${rows.length} حساب`}
+              </button>
+            </>
+          )}
+          {step === 'done' && (
+            <>
+              <button onClick={downloadCredentials} className="btn-success">
+                📥 تحميل بيانات الدخول (CSV)
+              </button>
+              <button onClick={() => { onDone?.(); onClose() }} className="btn-primary">إغلاق</button>
+            </>
+          )}
+          {step === 'upload' && (
+            <button onClick={onClose} className="btn-outline">إلغاء</button>
+          )}
+        </>
+      }
+    >
+      {step === 'upload' && (
+        <div className="space-y-4">
+          <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
+            <h4 className="font-bold text-blue-900 mb-2">📋 صيغة الملف المتوقعة</h4>
+            <p className="text-sm text-blue-800 mb-2">
+              ملف <code className="bg-white px-1.5 py-0.5 rounded">xlsx</code> أو
+              <code className="bg-white px-1.5 py-0.5 rounded mr-1">xls</code> بالأعمدة التالية:
+            </p>
+            <table className="w-full text-xs bg-white rounded border border-blue-200">
+              <thead className="bg-blue-100">
+                <tr>
+                  <th className="p-2 text-right">الاسم</th>
+                  <th className="p-2 text-right">البريد (اختياري)</th>
+                  <th className="p-2 text-right">الموبايل</th>
+                  <th className="p-2 text-right">الرقم النيابي</th>
+                  <th className="p-2 text-right">اللجان (يفصلها فاصلة)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-blue-200">
+                  <td className="p-2">د. علي محمد</td>
+                  <td className="p-2 text-gray-500">يُولَّد تلقائياً</td>
+                  <td className="p-2">07701112233</td>
+                  <td className="p-2">DEP-100</td>
+                  <td className="p-2">اللجنة المالية، لجنة النزاهة</td>
+                </tr>
+              </tbody>
+            </table>
+            <button onClick={downloadTemplate} className="btn-outline btn-sm mt-3">
+              📥 تحميل قالب جاهز
+            </button>
+          </div>
+
+          <label className="block">
+            <div className="border-2 border-dashed border-[var(--color-gold-400)] rounded-xl p-8 text-center cursor-pointer hover:bg-[var(--color-gold-50)] transition">
+              <div className="text-4xl mb-2">📥</div>
+              <p className="font-semibold text-[var(--color-navy-900)]">اضغط لاختيار ملف Excel</p>
+              <p className="text-xs text-[var(--color-navy-500)] mt-1">.xlsx, .xls</p>
+            </div>
+            <input type="file" accept=".xlsx,.xls" onChange={onFile} className="sr-only" />
+          </label>
+        </div>
+      )}
+
+      {step === 'preview' && (
+        <div>
+          <p className="text-sm text-[var(--color-navy-600)] mb-3">
+            راجع البيانات أدناه. سيتم توليد كلمات مرور عشوائية تلقائياً.
+          </p>
+          <div className="table-wrap max-h-96 overflow-y-auto">
+            <table className="table text-sm">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>الاسم</th>
+                  <th>البريد</th>
+                  <th>الموبايل</th>
+                  <th>اللجان</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td>
+                    <td className="font-semibold">{r.name}</td>
+                    <td className="text-xs font-mono" dir="ltr">{r.email || <span className="text-[var(--color-navy-400)]">سيُولَّد</span>}</td>
+                    <td className="text-xs" dir="ltr">{r.phone || '—'}</td>
+                    <td className="text-xs">{r.committees.join('، ') || <span className="text-[var(--color-navy-400)]">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {step === 'done' && (
+        <div className="space-y-3">
+          <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+            <p className="font-semibold text-emerald-900">
+              ✓ {results.filter((r) => r.success).length} حساب أُنشئ بنجاح
+              {results.some((r) => !r.success) && (
+                <span className="text-red-700"> • {results.filter((r) => !r.success).length} فشل</span>
+              )}
+            </p>
+            <p className="text-xs text-emerald-800 mt-1">
+              ⚠️ احفظ كلمات المرور الآن — لا يمكن استرجاعها لاحقاً (ستحتاج لإعادة تعيينها)
+            </p>
+          </div>
+          <div className="table-wrap max-h-96 overflow-y-auto">
+            <table className="table text-sm">
+              <thead>
+                <tr>
+                  <th>الاسم</th>
+                  <th>البريد</th>
+                  <th>كلمة المرور</th>
+                  <th>الحالة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r, i) => (
+                  <tr key={i} className={r.success ? '' : 'bg-red-50'}>
+                    <td className="font-semibold">{r.name}</td>
+                    <td className="text-xs font-mono" dir="ltr">{r.email}</td>
+                    <td className="text-xs font-mono font-bold">{r.password || '—'}</td>
+                    <td>
+                      {r.success ? <span className="badge-success">✓</span> : (
+                        <span className="badge-danger" title={r.error}>✗ {r.error?.slice(0, 30)}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 function ResetPasswordModal({ user, onClose, onSaved }) {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -457,7 +744,7 @@ function CreateUserModal({ open, departments, onClose, onCreated }) {
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('researcher')
   const [departmentId, setDepartmentId] = useState('')
-  const [committee, setCommittee] = useState('')
+  const [committees, setCommittees] = useState([])
   const [phone, setPhone] = useState('')
   const [busy, setBusy] = useState(false)
   const toast = useToast()
@@ -466,24 +753,28 @@ function CreateUserModal({ open, departments, onClose, onCreated }) {
     if (open) {
       setName(''); setEmail(''); setPassword('')
       setRole('researcher'); setDepartmentId('')
-      setCommittee(''); setPhone('')
+      setCommittees([]); setPhone('')
     }
   }, [open])
 
   const needsDept = ['department_head', 'researcher'].includes(role)
   const isDeputy = role === 'deputy'
 
+  const toggleCommittee = (c) => {
+    setCommittees((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])
+  }
+
   const submit = async (e) => {
     e.preventDefault()
     if (password.length < 6) return toast.error('كلمة المرور قصيرة')
     if (needsDept && !departmentId) return toast.error('اختر القسم')
-    if (isDeputy && !committee) return toast.error('اختر اللجنة النيابية')
+    if (isDeputy && committees.length === 0) return toast.error('اختر لجنة واحدة على الأقل')
     setBusy(true)
     try {
       await api.createUser({
         name, email, password, role,
         department_id: needsDept ? departmentId : null,
-        committee: isDeputy ? committee : null,
+        committees: isDeputy ? committees : [],
         phone: isDeputy && phone ? phone : null,
       })
       onCreated()
@@ -535,11 +826,22 @@ function CreateUserModal({ open, departments, onClose, onCreated }) {
         {isDeputy && (
           <>
             <div className="form-group">
-              <label className="label label-required">اللجنة النيابية</label>
-              <select className="select" value={committee} onChange={(e) => setCommittee(e.target.value)}>
-                <option value="">اختر اللجنة...</option>
-                {COMMITTEES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <label className="label label-required">اللجان النيابية (يمكن اختيار أكثر من واحدة)</label>
+              <p className="form-hint mb-2">الأولى تُعتبر اللجنة الرئيسية. {committees.length} مختارة</p>
+              <div className="max-h-56 overflow-y-auto border border-[var(--color-border)] rounded-lg p-2 space-y-1 bg-white">
+                {COMMITTEES.map((c) => {
+                  const checked = committees.includes(c)
+                  return (
+                    <label key={c} className={`flex items-start gap-2 p-2 rounded cursor-pointer transition ${
+                      checked ? 'bg-[var(--color-gold-50)] border border-[var(--color-gold-300)]' : 'hover:bg-[var(--color-surface-soft)]'
+                    }`}>
+                      <input type="checkbox" checked={checked} onChange={() => toggleCommittee(c)} className="mt-0.5 w-4 h-4" />
+                      <span className="text-sm flex-1">{c}</span>
+                      {checked && committees[0] === c && <span className="badge-gold text-[10px]">رئيسية</span>}
+                    </label>
+                  )
+                })}
+              </div>
             </div>
             <div className="form-group">
               <label className="label">رقم الموبايل (للإشعارات)</label>

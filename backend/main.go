@@ -100,6 +100,8 @@ func main() {
 	mux.Handle("GET /api/users/{id}", role("admin", "manager", "department_head")(http.HandlerFunc(handlers.GetUser)))
 	// إنشاء: أدمن (كل الأدوار) + رئيس قسم (باحث ومدقق فقط)
 	mux.Handle("POST /api/users", role("admin", "department_head")(http.HandlerFunc(handlers.CreateUser)))
+	// إنشاء عدة حسابات نواب بدفعة واحدة (admin only)
+	mux.Handle("POST /api/users/bulk", role("admin")(http.HandlerFunc(handlers.BulkCreateUsers)))
 	// تفعيل/تعطيل: أدمن + رئيس قسم (لموظفي قسمه)
 	mux.Handle("PUT /api/users/{id}/status", role("admin", "department_head")(http.HandlerFunc(handlers.UpdateUserStatus)))
 	// إعادة تعيين كلمة مرور أي مستخدم: أدمن فقط

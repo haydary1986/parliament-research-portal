@@ -13,7 +13,8 @@ type User struct {
 	Role           string     `json:"role"`
 	DepartmentID   *string    `json:"department_id"`
 	DeputyID       *string    `json:"deputy_id"`
-	Committee      *string    `json:"committee"`
+	Committee      *string    `json:"committee"`     // اللجنة الرئيسية (للتوافق مع القديم)
+	Committees     []string   `json:"committees,omitempty"` // قائمة كل لجان النائب
 	Phone          *string    `json:"phone"`
 	Specialization *string    `json:"specialization"`
 	Status         string     `json:"status"`
@@ -21,6 +22,29 @@ type User struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	Permissions    []string   `json:"permissions,omitempty"`
+}
+
+// BulkUserInput يستخدم لإنشاء عدة حسابات نواب دفعة واحدة
+type BulkUserInput struct {
+	Users []BulkUserRow `json:"users"`
+}
+
+type BulkUserRow struct {
+	Name       string   `json:"name"`
+	Email      string   `json:"email"`       // اختياري - يُولَّد تلقائياً من الاسم
+	Phone      string   `json:"phone"`       // اختياري
+	Role       string   `json:"role"`        // افتراضي "deputy"
+	Committees []string `json:"committees"`  // قائمة اللجان
+	DeputyID   string   `json:"deputy_id"`   // اختياري
+}
+
+type BulkUserResult struct {
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Password string `json:"password,omitempty"` // كلمة المرور المولَّدة
+	Success  bool   `json:"success"`
+	Error    string `json:"error,omitempty"`
+	UserID   int    `json:"user_id,omitempty"`
 }
 
 // =============================================

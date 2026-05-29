@@ -38,6 +38,19 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- =============================================
+-- لجان النواب - User Committees (M:N)
+-- النائب الواحد قد يكون عضواً في عدة لجان نيابية
+-- =============================================
+CREATE TABLE IF NOT EXISTS user_committees (
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    committee TEXT NOT NULL,
+    is_primary INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, committee)
+);
+CREATE INDEX IF NOT EXISTS idx_user_committees_user ON user_committees(user_id);
+
+-- =============================================
 -- جدول الصلاحيات - Permissions
 -- =============================================
 CREATE TABLE IF NOT EXISTS permissions (
