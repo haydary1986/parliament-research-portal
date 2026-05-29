@@ -5,8 +5,10 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"os"
 
 	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed schema.sql
@@ -34,6 +36,41 @@ func Init(dbPath string) error {
 	}
 
 	log.Println("✓ تم تهيئة قاعدة البيانات بنجاح")
+	return nil
+}
+
+// ResetAdminPasswordIfRequested يفحص env var ADMIN_PWD_RESET
+// إذا كان مُعيَّناً، يعيد تعيين كلمة مرور admin@parliament.iq
+// مفيد للحالات التي تكون فيها قاعدة البيانات قديمة وفقدنا الوصول للأدمن
+func ResetAdminPasswordIfRequested() error {
+	newPwd := os.Getenv("ADMIN_PWD_RESET")
+	if newPwd == "" {
+		return nil
+	}
+	if len(newPwd) < 6 {
+		log.Printf("⚠️  ADMIN_PWD_RESET مُعيَّن لكن أقل من 6 أحرف - تجاهل")
+		return nil
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPwd), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("توليد hash فشل: %w", err)
+	}
+
+	result, err := DB.Exec(
+		"UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE email = 'admin@parliament.iq'",
+		string(hash),
+	)
+	if err != nil {
+		return fmt.Errorf("تحديث كلمة مرور admin: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		log.Printf("✓ تم إعادة تعيين كلمة مرور admin@parliament.iq (يجب إزالة ADMIN_PWD_RESET الآن)")
+	} else {
+		log.Println("⚠️  ADMIN_PWD_RESET مُعيَّن لكن لا يوجد مستخدم admin@parliament.iq")
+	}
 	return nil
 }
 

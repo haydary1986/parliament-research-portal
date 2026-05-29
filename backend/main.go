@@ -29,6 +29,11 @@ func main() {
 		}
 	}
 
+	// إعادة تعيين كلمة مرور admin من env var (مفيد للنشر الأولي)
+	if err := db.ResetAdminPasswordIfRequested(); err != nil {
+		log.Printf("تحذير: %v", err)
+	}
+
 	mux := http.NewServeMux()
 
 	auth := middleware.Auth
