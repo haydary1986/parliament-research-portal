@@ -2,7 +2,7 @@
 # Parliament Research Portal - All-in-One Container
 # =====================================================
 # تطبيق موحَّد (backend + frontend) في حاوية واحدة
-# يستخدم supervisord لتشغيل Go backend + Nginx معاً
+# يستخدم shell script لتشغيل Go backend + Nginx معاً
 # مناسب لـ Coolify Dockerfile build pack
 # =====================================================
 
@@ -26,26 +26,21 @@ WORKDIR /build
 COPY deputy-portal/package.json deputy-portal/package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY deputy-portal/ ./
-# نفس الـ origin → /api يُوجَّه إلى backend عبر nginx
 ENV VITE_API_BASE=""
 RUN npm run build
 
 # =====================================================
-# Stage 3: Runtime (Nginx + Go binary via supervisord)
+# Stage 3: Runtime (Nginx + Go binary)
 # =====================================================
 FROM nginx:1.27-alpine
 
-# تثبيت المتطلبات
-RUN apk add --no-cache supervisor ca-certificates tzdata sqlite-libs && \
+RUN apk add --no-cache ca-certificates tzdata sqlite-libs && \
     rm -f /etc/nginx/conf.d/default.conf
 
-# نسخ Go binary
 COPY --from=backend-builder /noab-server /app/noab-server
-
-# نسخ ملفات الـ frontend المبنية
 COPY --from=frontend-builder /build/dist /usr/share/nginx/html
 
-# nginx.conf مخصص يخدم static + يوجِّه /api إلى localhost:8080
+# nginx config: static files + /api → 127.0.0.1:8080
 COPY <<'EOF' /etc/nginx/conf.d/default.conf
 server {
     listen 80;
@@ -59,9 +54,8 @@ server {
     gzip on;
     gzip_vary on;
     gzip_comp_level 6;
-    gzip_types text/plain text/css text/xml text/javascript application/javascript application/json font/woff2 image/svg+xml;
+    gzip_types text/plain text/css application/javascript application/json font/woff2 image/svg+xml;
 
-    # توجيه /api إلى Go backend على localhost:8080
     location /api/ {
         proxy_pass http://127.0.0.1:8080/api/;
         proxy_http_version 1.1;
@@ -86,48 +80,54 @@ server {
         root /usr/share/nginx/html;
         index index.html;
         try_files $uri $uri/ /index.html;
-
-        location = /index.html {
-            add_header Cache-Control "no-store, no-cache, must-revalidate" always;
-        }
     }
 
     location ~ /\. { deny all; access_log off; log_not_found off; }
 }
 EOF
 
-# تكوين supervisord لتشغيل nginx + noab-server معاً
-COPY <<'EOF' /etc/supervisor/conf.d/supervisord.conf
-[supervisord]
-nodaemon=true
-user=root
-logfile=/dev/null
-logfile_maxbytes=0
-pidfile=/tmp/supervisord.pid
+# Entrypoint: shell script يشغّل العمليتين ويربط دورة حياتهما
+COPY <<'EOF' /entrypoint.sh
+#!/bin/sh
+set -e
 
-[program:backend]
-command=/app/noab-server
-directory=/app
-autostart=true
-autorestart=true
-priority=10
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
+# دالة لإيقاف كل العمليات عند SIGTERM
+shutdown() {
+    echo "[entrypoint] shutting down..."
+    [ -n "$BACKEND_PID" ] && kill -TERM "$BACKEND_PID" 2>/dev/null || true
+    [ -n "$NGINX_PID" ] && kill -TERM "$NGINX_PID" 2>/dev/null || true
+    wait
+    exit 0
+}
+trap shutdown INT TERM
 
-[program:nginx]
-command=nginx -g "daemon off;"
-autostart=true
-autorestart=true
-priority=20
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
+echo "[entrypoint] starting Go backend on :8080..."
+/app/noab-server &
+BACKEND_PID=$!
+
+# انتظر backend ليبدأ ويستجيب
+echo "[entrypoint] waiting for backend to respond..."
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    if wget -q -O - http://127.0.0.1:8080/api/healthz 2>/dev/null | grep -q ok; then
+        echo "[entrypoint] ✓ backend ready"
+        break
+    fi
+    [ "$i" = "15" ] && echo "[entrypoint] ⚠️  backend timeout but continuing"
+    sleep 1
+done
+
+echo "[entrypoint] starting nginx on :80..."
+nginx -g 'daemon off;' &
+NGINX_PID=$!
+
+# انتظر أي عملية تموت ثم اخرج
+wait -n
+echo "[entrypoint] a process exited, shutting down container..."
+shutdown
 EOF
+RUN chmod +x /entrypoint.sh
 
-# مجلدات البيانات (mount points للـ volumes)
+# مجلدات البيانات
 RUN mkdir -p /app/data /app/uploads && chmod 755 /app/data /app/uploads
 
 ENV DB_PATH=/app/data/noab.db \
@@ -136,5 +136,4 @@ ENV DB_PATH=/app/data/noab.db \
 
 EXPOSE 80
 
-# نشغّل supervisord الذي يدير العمليتين
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+CMD ["/entrypoint.sh"]
