@@ -101,6 +101,9 @@ shutdown() {
 }
 trap shutdown INT TERM
 
+# 🔒 إجبار Go backend على port 8080 (Coolify قد يضع PORT=80 افتراضياً)
+export PORT=8080
+
 echo "[entrypoint] starting Go backend on :8080..."
 /app/noab-server &
 BACKEND_PID=$!
