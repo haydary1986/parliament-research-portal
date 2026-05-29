@@ -74,7 +74,8 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var requests []models.Request
+	requests := []models.Request{}
+	idIndex := map[string]int{} // request_id → index in requests slice
 	for rows.Next() {
 		var req models.Request
 		err := rows.Scan(
@@ -90,7 +91,33 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
+		idIndex[req.ID] = len(requests)
 		requests = append(requests, req)
+	}
+
+	// إثراء كل request بقائمة الأقسام المُحالة - استعلام واحد للجميع
+	if len(requests) > 0 {
+		ids := make([]interface{}, len(requests))
+		i := 0
+		for id := range idIndex {
+			ids[i] = id
+			i++
+		}
+		deptRows, err := db.DB.Query(
+			"SELECT request_id, department_id FROM request_departments WHERE request_id IN ("+placeholders(len(ids))+")",
+			ids...,
+		)
+		if err == nil {
+			defer deptRows.Close()
+			for deptRows.Next() {
+				var reqID, deptID string
+				if deptRows.Scan(&reqID, &deptID) == nil {
+					if idx, ok := idIndex[reqID]; ok {
+						requests[idx].AssignedDepartments = append(requests[idx].AssignedDepartments, deptID)
+					}
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, models.PaginatedResponse{

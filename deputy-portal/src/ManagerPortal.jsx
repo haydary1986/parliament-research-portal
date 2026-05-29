@@ -212,17 +212,34 @@ function RequestsTable({ rows, departments, onOpen, withFilter = false, emptyTex
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer">
-                  <td className="font-mono text-xs" dir="ltr">{r.id}</td>
-                  <td className="font-semibold max-w-xs truncate">{r.title}</td>
-                  <td className="text-sm">{r.deputy_name}</td>
-                  <td className="text-sm">{r.assigned_department || <span className="text-[var(--color-navy-400)]">—</span>}</td>
-                  <td className="text-xs text-[var(--color-navy-600)]">{formatDate(r.date_received)}</td>
-                  <td><StatusBadge status={r.status} /></td>
-                  <td><button className="btn-ghost btn-sm">إجراء</button></td>
-                </tr>
-              ))}
+              {filtered.map((r) => {
+                const depts = r.assigned_departments || []
+                const dispatchedDept = (() => {
+                  if (depts.length === 0 && !r.assigned_department) return null
+                  if (depts.length > 1) {
+                    const first = departments.find((x) => x.id === depts[0])?.name || depts[0]
+                    return (
+                      <span className="inline-flex items-center gap-1">
+                        <span className="font-medium">{first}</span>
+                        <span className="badge-gold text-[10px] px-1.5 py-0.5">+{depts.length - 1}</span>
+                      </span>
+                    )
+                  }
+                  const single = depts[0] || r.assigned_department
+                  return departments.find((x) => x.id === single)?.name || single
+                })()
+                return (
+                  <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer">
+                    <td className="font-mono text-xs" dir="ltr">{r.id}</td>
+                    <td className="font-semibold max-w-xs truncate">{r.title}</td>
+                    <td className="text-sm">{r.deputy_name}</td>
+                    <td className="text-sm">{dispatchedDept || <span className="text-[var(--color-navy-400)]">—</span>}</td>
+                    <td className="text-xs text-[var(--color-navy-600)]">{formatDate(r.date_received)}</td>
+                    <td><StatusBadge status={r.status} /></td>
+                    <td><button className="btn-ghost btn-sm">إجراء</button></td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -338,10 +355,16 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
   useEffect(() => {
     if (!request) { setDetail(null); return }
     setLoading(true)
-    setSelectedDepts([])
     setReviewNotes('')
     api.getRequest(request.id)
-      .then((r) => { if (r.success) setDetail(r.data) })
+      .then((r) => {
+        if (r.success) {
+          setDetail(r.data)
+          // pre-check الأقسام المُحالة سابقاً ليرى المدير حالتها الحالية
+          const existing = r.data?.assigned_departments || []
+          setSelectedDepts(existing.length > 0 ? existing : [])
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [request])
@@ -402,25 +425,63 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
             <Field label="النائب" value={d.deputy_name} />
             <Field label="اللجنة" value={d.committee} />
             <Field label="الغرض" value={PURPOSE_LABELS[d.purpose] || '—'} />
-            <Field label="القسم المسؤول" value={d.assigned_department || '—'} />
             <Field label="تاريخ التقديم" value={formatDate(d.date_received)} />
             <Field label="الموعد النهائي" value={formatDate(d.deadline)} />
+            <Field label="موافقة على النشر" value={d.can_share ? '✓ نعم' : '✗ لا'} />
           </div>
 
-          {d.status === 'pending' && (
+          {/* 🏢 الأقسام التي أُحيل إليها الطلب - مرئية دائماً عند وجود إحالة */}
+          {d.assigned_departments && d.assigned_departments.length > 0 && (
+            <div className="card p-4">
+              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-800)] flex items-center gap-2">
+                <svg className="w-4 h-4 text-[var(--color-gold-600)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+                الأقسام المُحالة إليها ({d.assigned_departments.length})
+              </h4>
+              <div className="flex flex-wrap gap-2">
+                {d.assigned_departments.map((deptId) => {
+                  const deptInfo = departments.find((x) => x.id === deptId)
+                  const isPrimary = deptId === d.assigned_department
+                  return (
+                    <div key={deptId} className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--color-gold-50)] border border-[var(--color-gold-300)]">
+                      <span className="text-sm font-semibold text-[var(--color-navy-900)]">
+                        {deptInfo?.name || deptId}
+                      </span>
+                      {isPrimary && (
+                        <span className="badge-gold text-[10px]">رئيسي</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {(d.status === 'pending' || d.status === 'assigned') && (
             <div className="card p-4 bg-[var(--color-navy-50)] border-[var(--color-navy-200)]">
-              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">إحالة الطلب (يمكن اختيار أكثر من قسم)</h4>
-              <p className="text-xs text-[var(--color-navy-600)] mb-3">حدد قسماً أو أكثر — سيتم إشعار رؤساء الأقسام المحددة</p>
+              <h4 className="font-bold text-sm mb-1 text-[var(--color-navy-900)]">
+                {d.status === 'pending' ? 'إحالة الطلب' : 'تعديل الإحالة'}
+              </h4>
+              <p className="text-xs text-[var(--color-navy-600)] mb-3">
+                {d.status === 'pending'
+                  ? 'حدد قسماً أو أكثر — سيتم إشعار رؤساء الأقسام المحددة'
+                  : 'الأقسام المُحدّدة سابقاً مفعّلة. أضف/أزل لإعادة الإحالة (سيستبدل الإحالة الحالية)'}
+              </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
                 {departments.map((dept) => {
                   const checked = selectedDepts.includes(dept.id)
+                  const wasAssigned = (d.assigned_departments || []).includes(dept.id)
                   return (
                     <label key={dept.id} className={`flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition ${
                       checked ? 'border-[var(--color-gold-500)] bg-[var(--color-gold-50)]' : 'border-[var(--color-border)] hover:bg-white'
                     }`}>
                       <input type="checkbox" checked={checked} onChange={() => toggleDept(dept.id)} className="w-4 h-4" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-[var(--color-navy-900)] truncate">{dept.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm font-semibold text-[var(--color-navy-900)] truncate">{dept.name}</p>
+                          {wasAssigned && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[var(--color-gold-200)] text-[var(--color-gold-800)]">مُحال حالياً</span>}
+                        </div>
                         <p className="text-[10px] text-[var(--color-navy-500)]">{dept.researcher_count} باحث • {dept.active_requests} نشط</p>
                       </div>
                     </label>
@@ -429,9 +490,11 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
               </div>
               <div className="flex gap-2">
                 <button onClick={assign} disabled={busy || selectedDepts.length === 0} className="btn-primary flex-1">
-                  إحالة {selectedDepts.length > 0 && `(${selectedDepts.length})`}
+                  {d.status === 'pending' ? 'إحالة' : 'حفظ التغييرات'} {selectedDepts.length > 0 && `(${selectedDepts.length})`}
                 </button>
-                <button onClick={returnReq} disabled={busy} className="btn-outline flex-1">لا يمكن التنفيذ</button>
+                {d.status === 'pending' && (
+                  <button onClick={returnReq} disabled={busy} className="btn-outline flex-1">لا يمكن التنفيذ</button>
+                )}
               </div>
             </div>
           )}

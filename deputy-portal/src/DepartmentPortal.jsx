@@ -171,16 +171,29 @@ function RequestsTable({ rows, onOpen, emptyText }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer">
-              <td className="font-mono text-xs" dir="ltr">{r.id}</td>
-              <td className="font-semibold max-w-md truncate">{r.title}</td>
-              <td className="text-sm">{r.deputy_name}</td>
-              <td className="text-xs">{formatDate(r.referral_date || r.date_received)}</td>
-              <td><StatusBadge status={r.status} /></td>
-              <td><button className="btn-ghost btn-sm">إجراء</button></td>
-            </tr>
-          ))}
+          {rows.map((r) => {
+            const allDepts = r.assigned_departments || []
+            const sharedWith = allDepts.length > 1
+            return (
+              <tr key={r.id} onClick={() => onOpen(r)} className="cursor-pointer">
+                <td className="font-mono text-xs" dir="ltr">{r.id}</td>
+                <td className="font-semibold max-w-md truncate">
+                  <div className="flex items-center gap-2">
+                    <span>{r.title}</span>
+                    {sharedWith && (
+                      <span className="badge-gold text-[10px]" title={`مشترك مع ${allDepts.length - 1} قسم آخر`}>
+                        + مشترك
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="text-sm">{r.deputy_name}</td>
+                <td className="text-xs">{formatDate(r.referral_date || r.date_received)}</td>
+                <td><StatusBadge status={r.status} /></td>
+                <td><button className="btn-ghost btn-sm">إجراء</button></td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -341,6 +354,22 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
             </div>
             <p className="text-sm text-[var(--color-navy-600)]">{d.description}</p>
           </div>
+
+          {/* الأقسام التي يشاركها الطلب */}
+          {d.assigned_departments && d.assigned_departments.length > 1 && (
+            <div className="card p-3 bg-blue-50 border-blue-200">
+              <p className="text-xs font-semibold text-blue-900 mb-2">
+                ℹ️ هذا الطلب مُحال إلى {d.assigned_departments.length} أقسام:
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {d.assigned_departments.map((deptId) => (
+                  <span key={deptId} className={`badge ${deptId === d.assigned_department ? 'badge-gold' : 'badge-info'} text-[11px]`}>
+                    {deptId}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {d.status === 'assigned' && (
             <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
