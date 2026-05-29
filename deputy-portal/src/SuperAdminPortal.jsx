@@ -157,6 +157,7 @@ function AdminDashboard({ stats, users, departments, activity }) {
 function UsersView({ users, onChanged }) {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
+  const [resetUser, setResetUser] = useState(null)
   const toast = useToast()
 
   const filtered = users.filter((u) => {
@@ -189,6 +190,8 @@ function UsersView({ users, onChanged }) {
           {Object.entries(ROLE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </div>
+
+      <ResetPasswordModal user={resetUser} onClose={() => setResetUser(null)} onSaved={onChanged} />
 
       <div className="table-wrap">
         <table className="table">
@@ -224,9 +227,14 @@ function UsersView({ users, onChanged }) {
                 </td>
                 <td className="text-xs">{u.last_login ? formatDate(u.last_login) : '—'}</td>
                 <td>
-                  <button onClick={() => toggleStatus(u)} className="btn-ghost btn-sm">
-                    {u.status === 'active' ? 'تعطيل' : 'تفعيل'}
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setResetUser(u)} className="btn-ghost btn-sm" title="إعادة تعيين كلمة المرور">
+                      🔑
+                    </button>
+                    <button onClick={() => toggleStatus(u)} className="btn-ghost btn-sm">
+                      {u.status === 'active' ? 'تعطيل' : 'تفعيل'}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -347,6 +355,99 @@ function SecurityView({ security }) {
         </ul>
       </div>
     </div>
+  )
+}
+
+function ResetPasswordModal({ user, onClose, onSaved }) {
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+
+  useEffect(() => {
+    if (user) { setNewPassword(''); setConfirmPassword('') }
+  }, [user])
+
+  if (!user) return null
+
+  const generateRandom = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+    let pwd = ''
+    for (let i = 0; i < 10; i++) pwd += chars[Math.floor(Math.random() * chars.length)]
+    setNewPassword(pwd); setConfirmPassword(pwd)
+  }
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (newPassword.length < 6) return toast.error('كلمة المرور يجب أن تكون 6 أحرف على الأقل')
+    if (newPassword !== confirmPassword) return toast.error('كلمتا المرور غير متطابقتين')
+    setBusy(true)
+    try {
+      await api.adminResetPassword(user.id, newPassword)
+      toast.success(`تم تعيين كلمة المرور لـ ${user.name}`)
+      onSaved?.()
+      onClose()
+    } catch (err) { toast.error(err.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <Modal
+      open={!!user}
+      onClose={onClose}
+      title="إعادة تعيين كلمة المرور"
+      size="sm"
+      footer={
+        <>
+          <button onClick={onClose} className="btn-outline">إلغاء</button>
+          <button form="rp-form" type="submit" disabled={busy} className="btn-danger">
+            {busy ? 'جاري التعيين...' : 'تعيين كلمة مرور جديدة'}
+          </button>
+        </>
+      }
+    >
+      <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 mb-4 flex items-start gap-2">
+        <span className="text-xl">⚠️</span>
+        <div className="flex-1 text-sm">
+          <p className="font-semibold text-amber-900">إعادة تعيين كلمة مرور:</p>
+          <p className="text-amber-800 mt-0.5">
+            <strong>{user.name}</strong> ({user.email})
+          </p>
+          <p className="text-amber-700 text-xs mt-2">
+            سيُرسَل إشعار للمستخدم بأن كلمة مروره قد أُعيد تعيينها.
+            احفظ كلمة المرور الجديدة وأرسلها له بطريقة آمنة.
+          </p>
+        </div>
+      </div>
+      <form id="rp-form" onSubmit={submit} className="space-y-3">
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label className="label label-required mb-0">كلمة المرور الجديدة</label>
+            <button type="button" onClick={generateRandom} className="text-xs text-[var(--color-gold-700)] hover:underline">
+              🎲 توليد عشوائية
+            </button>
+          </div>
+          <input
+            type="text"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="input font-mono"
+            placeholder="6 أحرف على الأقل"
+            required minLength={6}
+          />
+        </div>
+        <div>
+          <label className="label label-required">تأكيد كلمة المرور</label>
+          <input
+            type="text"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            className="input font-mono"
+            required minLength={6}
+          />
+        </div>
+      </form>
+    </Modal>
   )
 }
 

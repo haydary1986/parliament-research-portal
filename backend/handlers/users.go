@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"noab-backend/db"
 	"noab-backend/models"
@@ -257,5 +258,65 @@ func UpdateUserStatus(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Message: "تم تحديث حالة المستخدم",
+	})
+}
+
+// PUT /api/users/{id}/reset-password - الأدمن يعيد تعيين كلمة مرور أي مستخدم
+// (admin only - لا يحتاج كلمة المرور القديمة)
+func AdminResetPassword(w http.ResponseWriter, r *http.Request) {
+	targetID := r.PathValue("id")
+	adminID := getUserID(r)
+
+	var input struct {
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
+		return
+	}
+	if len(input.NewPassword) < 6 {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
+		})
+		return
+	}
+
+	// التأكد أن المستخدم المستهدف موجود
+	var targetName, targetEmail string
+	if err := db.DB.QueryRow("SELECT name, email FROM users WHERE id = ?", targetID).Scan(&targetName, &targetEmail); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المستخدم غير موجود"})
+		return
+	}
+
+	newHash, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "خطأ في تشفير كلمة المرور"})
+		return
+	}
+
+	if _, err := db.DB.Exec(
+		"UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		string(newHash), targetID,
+	); err != nil {
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تحديث كلمة المرور"})
+		return
+	}
+
+	// تسجيل النشاط
+	var adminName string
+	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", adminID).Scan(&adminName)
+	logActivity(adminID, adminName, "admin_reset_password", strPtr("user"), &targetID,
+		"إعادة تعيين كلمة مرور المستخدم: "+targetName+" ("+targetEmail+")")
+
+	// إشعار المستخدم المتأثر
+	tid, _ := strconv.Atoi(targetID)
+	if tid > 0 {
+		createNotification(tid, "تم إعادة تعيين كلمة مرورك",
+			"قام مدير النظام بإعادة تعيين كلمة المرور الخاصة بك. يرجى تسجيل الدخول واستخدام كلمة المرور الجديدة.",
+			"warning", nil, nil)
+	}
+
+	writeJSON(w, http.StatusOK, models.APIResponse{
+		Success: true, Message: "تم إعادة تعيين كلمة المرور بنجاح",
 	})
 }

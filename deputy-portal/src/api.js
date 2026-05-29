@@ -95,6 +95,11 @@ export function updateUserStatus(id, status) {
   return request('PUT', `/users/${id}/status`, { status });
 }
 
+// إعادة تعيين كلمة مرور أي مستخدم (admin only)
+export function adminResetPassword(id, newPassword) {
+  return request('PUT', `/users/${id}/reset-password`, { new_password: newPassword });
+}
+
 // ========== Departments ==========
 export function getDepartments() {
   return request('GET', '/departments');

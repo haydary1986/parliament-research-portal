@@ -97,6 +97,8 @@ func main() {
 	mux.Handle("POST /api/users", role("admin", "department_head")(http.HandlerFunc(handlers.CreateUser)))
 	// تفعيل/تعطيل: أدمن + رئيس قسم (لموظفي قسمه)
 	mux.Handle("PUT /api/users/{id}/status", role("admin", "department_head")(http.HandlerFunc(handlers.UpdateUserStatus)))
+	// إعادة تعيين كلمة مرور أي مستخدم: أدمن فقط
+	mux.Handle("PUT /api/users/{id}/reset-password", role("admin")(http.HandlerFunc(handlers.AdminResetPassword)))
 
 	// =============================================
 	// الأقسام - Departments

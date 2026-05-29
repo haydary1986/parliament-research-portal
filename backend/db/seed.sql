@@ -39,9 +39,9 @@ INSERT OR IGNORE INTO permissions (name, description, category) VALUES
 -- المستخدمين - Users (password: 123456)
 -- =============================================
 
--- مدير النظام (أدمن)
+-- مدير النظام (أدمن) - كلمة المرور: 123456 (نفس الـ hash للجميع للتطوير)
 INSERT OR IGNORE INTO users (id, name, email, password_hash, role, department_id, status) VALUES
-(1, 'مدير النظام', 'admin@parliament.iq', '$2a$10$aKNxJuhFUxcCNaqZ64byd.7RKhaZjgGaeEOr8bwVOqIfOZ2GJlK2K', 'admin', NULL, 'active');
+(1, 'مدير النظام', 'admin@parliament.iq', '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'admin', NULL, 'active');
 
 -- مدير الدائرة
 INSERT OR IGNORE INTO users (id, name, email, password_hash, role, department_id, status) VALUES
