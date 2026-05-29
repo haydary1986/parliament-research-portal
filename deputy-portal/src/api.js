@@ -1,4 +1,9 @@
-const API_BASE = (import.meta.env.VITE_API_BASE || 'http://localhost:8080') + '/api';
+// VITE_API_BASE:
+// - في development: http://localhost:8080 (Go dev server)
+// - في production: "" (URL نسبي → nginx يوجِّه /api لـ Go على نفس الـ origin)
+// نستخدم ?? بدلاً من || لأن empty string "" يجب أن يبقى كما هو
+const RAW_BASE = import.meta.env.VITE_API_BASE;
+const API_BASE = (RAW_BASE !== undefined ? RAW_BASE : 'http://localhost:8080') + '/api';
 
 let authToken = null;
 
