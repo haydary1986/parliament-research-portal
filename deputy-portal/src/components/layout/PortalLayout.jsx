@@ -22,6 +22,7 @@ export default function PortalLayout({
   const [newPw, setNewPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
   const [busy, setBusy] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const toast = useToast()
 
   const submitPassword = async (e) => {
@@ -40,15 +41,29 @@ export default function PortalLayout({
     }
   }
 
+  // إغلاق السايدبار تلقائياً عند تنقل النائب (على الهاتف)
+  const handleNavigate = (key) => {
+    setSidebarOpen(false)
+    onNavigate?.(key)
+  }
+
   return (
     <div className="page-container">
+      {/* خلفية شفافة لإغلاق السايدبار عند الضغط خارجها (هاتف فقط) */}
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? 'show' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
       <Sidebar
         items={navItems}
         activeKey={activeKey}
-        onNavigate={onNavigate}
+        onNavigate={handleNavigate}
         user={user}
         onLogout={onLogout}
         portalLabel={portalLabel}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
       <div className="page-content">
         <Topbar
@@ -56,6 +71,7 @@ export default function PortalLayout({
           subtitle={subtitle}
           actions={actions}
           onChangePassword={() => setPwOpen(true)}
+          onMenuClick={() => setSidebarOpen(true)}
         />
         <main className="page-main animate-fade-in">{children}</main>
       </div>

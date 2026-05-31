@@ -3,7 +3,7 @@ import { IconBell, IconLock } from '../icons/Icons'
 import * as api from '../../api'
 import { useToast } from '../ui/Toast'
 
-export default function Topbar({ title, subtitle, actions, onChangePassword }) {
+export default function Topbar({ title, subtitle, actions, onChangePassword, onMenuClick }) {
   const [notifs, setNotifs] = useState([])
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
@@ -43,12 +43,21 @@ export default function Topbar({ title, subtitle, actions, onChangePassword }) {
 
   return (
     <header className="topbar sticky top-0 z-20">
+      {/* زر القائمة (هاتف فقط) */}
+      {onMenuClick && (
+        <button onClick={onMenuClick} className="hamburger" aria-label="فتح القائمة">
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      )}
+
       <div className="flex-1 min-w-0">
         <h1 className="page-title truncate">{title}</h1>
-        {subtitle && <p className="page-subtitle">{subtitle}</p>}
+        {subtitle && <p className="page-subtitle truncate">{subtitle}</p>}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 md:gap-2">
         {actions}
 
         {onChangePassword && (
@@ -67,7 +76,7 @@ export default function Topbar({ title, subtitle, actions, onChangePassword }) {
             )}
           </button>
           {open && (
-            <div className="absolute left-0 top-12 w-96 card shadow-xl z-30 animate-fade-in overflow-hidden">
+            <div className="fixed md:absolute inset-x-2 md:inset-x-auto md:left-0 top-16 md:top-12 md:w-96 card shadow-xl z-30 animate-fade-in overflow-hidden">
               <div className="card-header py-3">
                 <h4 className="font-bold text-sm">الإشعارات</h4>
                 {unread > 0 && <span className="badge-info">{unread} غير مقروء</span>}

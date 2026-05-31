@@ -1,15 +1,21 @@
 import Brand from './Brand'
-import { IconLogout } from '../icons/Icons'
+import { IconLogout, IconX } from '../icons/Icons'
 
-export default function Sidebar({ items, activeKey, onNavigate, user, onLogout, portalLabel }) {
+export default function Sidebar({ items, activeKey, onNavigate, user, onLogout, portalLabel, isOpen, onClose }) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
       <div className="sidebar-brand">
         <Brand size={42} />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-white leading-tight">مجلس النواب العراقي</p>
           <p className="text-[11px] text-[var(--color-gold-300)] mt-0.5">دائرة البحوث والدراسات</p>
         </div>
+        {/* زر إغلاق للهاتف فقط */}
+        {onClose && (
+          <button onClick={onClose} className="md:hidden p-1.5 rounded-lg text-white/70 hover:bg-white/10" aria-label="إغلاق القائمة">
+            <IconX className="w-5 h-5" />
+          </button>
+        )}
       </div>
 
       {portalLabel && (

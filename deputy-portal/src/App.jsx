@@ -85,23 +85,23 @@ function LoginPage({ onSuccess }) {
   }
 
   return (
-    <div className="min-h-screen login-bg flex items-center justify-center p-4" dir="rtl">
+    <div className="min-h-screen login-bg flex items-center justify-center p-3 sm:p-4" dir="rtl">
       <div className="w-full max-w-6xl">
         {/* Header */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center mb-4">
-            <Brand size={88} />
+        <div className="text-center mb-6 sm:mb-8">
+          <div className="inline-flex items-center justify-center mb-3 sm:mb-4">
+            <Brand size={64} />
           </div>
-          <h1 className="text-4xl font-bold text-white mb-2 tracking-tight">مجلس النواب العراقي</h1>
+          <h1 className="text-2xl sm:text-4xl font-bold text-white mb-2 tracking-tight">مجلس النواب العراقي</h1>
           <div className="flex items-center justify-center gap-2">
-            <span className="h-px w-12 bg-[var(--color-gold-500)]" />
-            <p className="text-base font-semibold text-[var(--color-gold-300)]">دائرة البحوث والدراسات</p>
-            <span className="h-px w-12 bg-[var(--color-gold-500)]" />
+            <span className="h-px w-8 sm:w-12 bg-[var(--color-gold-500)]" />
+            <p className="text-sm sm:text-base font-semibold text-[var(--color-gold-300)]">دائرة البحوث والدراسات</p>
+            <span className="h-px w-8 sm:w-12 bg-[var(--color-gold-500)]" />
           </div>
-          <p className="text-sm text-[var(--color-navy-200)] mt-3">منصة إدارة البحوث البرلمانية</p>
+          <p className="text-xs sm:text-sm text-[var(--color-navy-200)] mt-2 sm:mt-3">منصة إدارة البحوث البرلمانية</p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6">
           {/* Login form */}
           <div className="lg:col-span-2">
             <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
