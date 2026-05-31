@@ -45,22 +45,38 @@ export default function DepartmentPortal({ user, onLogout }) {
   useEffect(() => { refresh() }, [user?.department_id])
 
   const incoming = requests.filter((r) => r.status === 'assigned')
-  const inProgress = requests.filter((r) => ['confirmed', 'in_progress', 'review'].includes(r.status))
+  const inProgress = requests.filter((r) => ['confirmed', 'in_progress', 'review', 'pending_dept_review', 'proofreading'].includes(r.status))
+  const reviewing = requests.filter((r) => r.status === 'pending_dept_review' || r.status === 'pending_dept_send')
 
   const navItems = [
     { key: 'dashboard', label: 'لوحة المعلومات', icon: IconDashboard },
     { key: 'incoming', label: 'طلبات واردة', icon: IconClock, badge: incoming.length },
+    { key: 'reviewing', label: 'بانتظار قراري', icon: IconProofread, badge: reviewing.length },
     { key: 'in_progress', label: 'قيد التنفيذ', icon: IconDocument },
     { key: 'research', label: 'مهام البحث', icon: IconResearch },
     { key: 'team', label: 'فريق القسم', icon: IconUsers },
   ]
 
+  // اسم القسم من أحد الباحثين أو من قائمة افتراضية
+  const deptName = (() => {
+    if (!user?.department_id) return ''
+    const map = {
+      research: 'قسم البحوث',
+      budget_research: 'قسم بحوث الموازنة',
+      legal_studies: 'قسم الدراسات القانونية',
+      parliament_library: 'قسم المكتبة النيابية',
+      research_support: 'قسم الدعم البحثي',
+    }
+    return map[user.department_id] || user.department_id
+  })()
+
   const meta = {
-    dashboard: { title: 'لوحة معلومات القسم', subtitle: 'متابعة عمل القسم البحثي' },
-    incoming: { title: 'الطلبات الواردة', subtitle: 'طلبات بحاجة إلى تأكيد وتعيين باحث' },
+    dashboard: { title: deptName ? `لوحة ${deptName}` : 'لوحة معلومات القسم', subtitle: `أهلاً ${user?.name || ''} — متابعة عمل ${deptName}` },
+    incoming:  { title: `الطلبات الواردة لـ ${deptName}`, subtitle: 'طلبات بحاجة إلى تأكيد وتعيين باحث' },
+    reviewing: { title: 'البحوث بانتظار قرارك', subtitle: 'بحوث مسلَّمة من الباحث للمراجعة أو جاهزة للإرسال للنائب' },
     in_progress: { title: 'الطلبات الجارية', subtitle: 'طلبات بدأ العمل عليها' },
     research: { title: 'مهام البحث', subtitle: 'كل المهام البحثية للقسم' },
-    team: { title: 'فريق القسم', subtitle: 'الباحثون وإدارة الفريق' },
+    team: { title: `فريق ${deptName}`, subtitle: 'الباحثون وإدارة الفريق' },
   }
 
   return (
@@ -82,8 +98,9 @@ export default function DepartmentPortal({ user, onLogout }) {
     >
       {loading ? <PageLoader /> : (
         <>
-          {tab === 'dashboard' && <DeptDashboard requests={requests} tasks={researchTasks} researchers={researchers} />}
+          {tab === 'dashboard' && <DeptDashboard requests={requests} tasks={researchTasks} researchers={researchers} deptName={deptName} />}
           {tab === 'incoming' && <RequestsTable rows={incoming} onOpen={setActiveRequest} emptyText="لا توجد طلبات واردة" />}
+          {tab === 'reviewing' && <RequestsTable rows={reviewing} onOpen={setActiveRequest} emptyText="لا توجد بحوث بانتظار قرارك" />}
           {tab === 'in_progress' && <RequestsTable rows={inProgress} onOpen={setActiveRequest} emptyText="لا توجد طلبات قيد التنفيذ" />}
           {tab === 'research' && <ResearchTasksTable rows={researchTasks} onOpen={setActiveTask} />}
           {tab === 'team' && <TeamView researchers={researchers} />}
@@ -112,19 +129,30 @@ export default function DepartmentPortal({ user, onLogout }) {
   )
 }
 
-function DeptDashboard({ requests, tasks, researchers }) {
+function DeptDashboard({ requests, tasks, researchers, deptName }) {
   const stats = {
     incoming: requests.filter((r) => r.status === 'assigned').length,
     active: tasks.filter((t) => ['assigned', 'in_progress'].includes(t.status)).length,
-    proofread: tasks.filter((t) => t.status === 'sent_to_proofreader').length,
+    waitingReview: requests.filter((r) => r.status === 'pending_dept_review').length,
+    proofread: requests.filter((r) => r.status === 'proofreading').length,
+    waitingSend: requests.filter((r) => r.status === 'pending_dept_send').length,
     completed: tasks.filter((t) => t.status === 'completed').length,
   }
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {deptName && (
+        <div className="card p-4 bg-gradient-to-l from-[var(--color-navy-50)] to-white border-r-4 border-r-[var(--color-gold-500)]">
+          <p className="text-[11px] uppercase tracking-wider text-[var(--color-navy-500)] font-semibold">القسم</p>
+          <h2 className="text-xl font-bold text-[var(--color-navy-900)] mt-0.5">{deptName}</h2>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <StatCard label="طلبات واردة" value={stats.incoming} tone="warning" icon={<IconClock />} />
         <StatCard label="قيد البحث" value={stats.active} tone="info" icon={<IconResearch />} />
+        <StatCard label="بانتظار قراري" value={stats.waitingReview} tone="warning" icon={<IconProofread />} />
         <StatCard label="قيد التدقيق" value={stats.proofread} tone="navy" icon={<IconProofread />} />
+        <StatCard label="جاهز للإرسال" value={stats.waitingSend} tone="info" icon={<IconCheck />} />
         <StatCard label="مكتمل" value={stats.completed} tone="success" icon={<IconCheck />} />
       </div>
 
@@ -202,7 +230,7 @@ function RequestsTable({ rows, onOpen, emptyText }) {
 
 function ResearchTasksTable({ rows, onOpen }) {
   const [search, setSearch] = useState('')
-  const filtered = rows.filter((r) => !search || r.request_title?.toLowerCase().includes(search.toLowerCase()))
+  const filtered = rows.filter((r) => !search || r.request_title?.toLowerCase().includes(search.toLowerCase()) || r.id?.toLowerCase().includes(search.toLowerCase()))
   if (rows.length === 0) return <div className="card"><EmptyState title="لا توجد مهام بحث" /></div>
   return (
     <div className="space-y-4">
@@ -216,11 +244,12 @@ function ResearchTasksTable({ rows, onOpen }) {
         <table className="table">
           <thead>
             <tr>
-              <th>رقم المهمة</th>
               <th>عنوان البحث</th>
+              <th>رقم المهمة</th>
               <th>الباحث</th>
               <th>تاريخ التعيين</th>
               <th>الموعد النهائي</th>
+              <th>المدة</th>
               <th>الحالة</th>
               <th />
             </tr>
@@ -228,11 +257,14 @@ function ResearchTasksTable({ rows, onOpen }) {
           <tbody>
             {filtered.map((t) => (
               <tr key={t.id} onClick={() => onOpen(t)} className="cursor-pointer">
-                <td className="font-mono text-xs" dir="ltr">{t.id}</td>
-                <td className="font-semibold max-w-xs truncate">{t.request_title}</td>
+                <td className="font-semibold max-w-xs" title={t.request_title}>
+                  <div className="line-clamp-2">{t.request_title || <span className="text-[var(--color-navy-400)]">—</span>}</div>
+                </td>
+                <td className="font-mono text-xs whitespace-nowrap" dir="ltr">{t.id}</td>
                 <td className="text-sm">{t.researcher_name}</td>
-                <td className="text-xs">{formatDate(t.date_assigned)}</td>
-                <td className="text-xs">{formatDate(t.deadline)}</td>
+                <td className="text-xs whitespace-nowrap">{formatDate(t.date_assigned)}</td>
+                <td className="text-xs whitespace-nowrap">{formatDate(t.deadline)}</td>
+                <td className="text-xs whitespace-nowrap">{t.completion_days ? `${t.completion_days} يوم` : '—'}</td>
                 <td><StatusBadge status={t.status} /></td>
                 <td><button className="btn-ghost btn-sm">عرض</button></td>
               </tr>

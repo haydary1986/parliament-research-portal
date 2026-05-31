@@ -43,9 +43,10 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 	case "department_head":
 		var deptID string
 		db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&deptID)
-		query += " AND r.assigned_department = ?"
-		countQuery += " AND r.assigned_department = ?"
-		args = append(args, deptID)
+		// رئيس القسم يرى أي طلب محال إليه عبر r.assigned_department أو request_departments
+		query += " AND (r.assigned_department = ? OR r.id IN (SELECT request_id FROM request_departments WHERE department_id = ?))"
+		countQuery += " AND (r.assigned_department = ? OR r.id IN (SELECT request_id FROM request_departments WHERE department_id = ?))"
+		args = append(args, deptID, deptID)
 	}
 
 	if status != "" {
@@ -54,9 +55,10 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 		args = append(args, status)
 	}
 	if department != "" {
-		query += " AND r.assigned_department = ?"
-		countQuery += " AND r.assigned_department = ?"
-		args = append(args, department)
+		// الفلترة الصريحة بقسم تطابق primary أو junction
+		query += " AND (r.assigned_department = ? OR r.id IN (SELECT request_id FROM request_departments WHERE department_id = ?))"
+		countQuery += " AND (r.assigned_department = ? OR r.id IN (SELECT request_id FROM request_departments WHERE department_id = ?))"
+		args = append(args, department, department)
 	}
 
 	var total int
@@ -165,7 +167,19 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 	if role == "department_head" {
 		var deptID string
 		db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&deptID)
-		if req.AssignedDepartment == nil || *req.AssignedDepartment != deptID {
+		// السماح إذا كان قسمه هو الرئيسي أو ضمن request_departments
+		allowed := req.AssignedDepartment != nil && *req.AssignedDepartment == deptID
+		if !allowed {
+			var n int
+			db.DB.QueryRow(
+				"SELECT COUNT(*) FROM request_departments WHERE request_id = ? AND department_id = ?",
+				id, deptID,
+			).Scan(&n)
+			if n > 0 {
+				allowed = true
+			}
+		}
+		if !allowed {
 			writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بعرض هذا الطلب"})
 			return
 		}

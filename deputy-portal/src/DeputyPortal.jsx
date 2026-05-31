@@ -97,7 +97,11 @@ export default function DeputyPortal({ user, onLogout }) {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={() => { setCreateOpen(false); refresh(); toast.success('تم تقديم الطلب بنجاح') }}
-        defaultCommittee={user?.committee}
+        defaultCommittees={
+          (user?.committees && user.committees.length > 0)
+            ? user.committees
+            : (user?.committee ? [user.committee] : [])
+        }
       />
       <RequestDetailModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />
     </PortalLayout>
@@ -209,11 +213,11 @@ function RequestsView({ requests, search, onSearch, statusFilter, onStatusFilter
   )
 }
 
-function CreateRequestModal({ open, onClose, onCreated, defaultCommittee }) {
+function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [purpose, setPurpose] = useState('oversight')
-  const [committee, setCommittee] = useState('')
+  const [committees, setCommittees] = useState([])
   const [canShare, setCanShare] = useState(false)
   const [busy, setBusy] = useState(false)
   const toast = useToast()
@@ -223,18 +227,29 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittee }) {
       setTitle('')
       setDescription('')
       setPurpose('oversight')
-      setCommittee(defaultCommittee && COMMITTEES.includes(defaultCommittee) ? defaultCommittee : '')
+      // افتراضياً نختار كل لجان النائب
+      setCommittees(Array.isArray(defaultCommittees) ? defaultCommittees.filter((c) => COMMITTEES.includes(c)) : [])
       setCanShare(false)
     }
-  }, [open, defaultCommittee])
+  }, [open, defaultCommittees])
+
+  const toggleCommittee = (c) => {
+    setCommittees((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])
+  }
 
   const submit = async (e) => {
     e.preventDefault()
     if (title.length < 5) return toast.error('العنوان قصير جداً')
-    if (!committee) return toast.error('يرجى اختيار اللجنة')
+    if (committees.length === 0) return toast.error('يرجى اختيار لجنة واحدة على الأقل')
     setBusy(true)
     try {
-      await api.createRequest({ title, description, purpose, committee, can_share: canShare })
+      // نرسل اللجنة الأولى كرئيسية (للتوافق). الـ backend الحالي يخزن committee واحدة
+      // عدة لجان للطلب تُمثَّل في الحقل النصي مفصولة بفاصلة
+      await api.createRequest({
+        title, description, purpose,
+        committee: committees.join('، '),
+        can_share: canShare,
+      })
       onCreated()
     } catch (err) {
       toast.error(err.message || 'فشل تقديم الطلب')
@@ -266,12 +281,23 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittee }) {
           <p className="form-hint">كلما كان الوصف أوضح، كانت نتيجة البحث أدق</p>
         </div>
         <div className="form-group">
-          <label className="label label-required">اللجنة النيابية</label>
-          <select className="select" value={committee} onChange={(e) => setCommittee(e.target.value)} required>
-            <option value="">اختر اللجنة...</option>
-            {COMMITTEES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <p className="form-hint">قائمة اللجان الرسمية بعد تعديل النظام الداخلي ({COMMITTEES.length} لجنة)</p>
+          <label className="label label-required">اللجان النيابية (يمكن اختيار أكثر من لجنة)</label>
+          <p className="form-hint mb-2">
+            عدد المختارة: <strong>{committees.length}</strong> من أصل {COMMITTEES.length}
+          </p>
+          <div className="max-h-64 overflow-y-auto border border-[var(--color-border)] rounded-lg p-2 space-y-1 bg-white">
+            {COMMITTEES.map((c) => {
+              const checked = committees.includes(c)
+              return (
+                <label key={c} className={`flex items-start gap-2 p-2 rounded cursor-pointer transition ${
+                  checked ? 'bg-[var(--color-gold-50)] border border-[var(--color-gold-300)]' : 'hover:bg-[var(--color-surface-soft)]'
+                }`}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleCommittee(c)} className="mt-0.5 w-4 h-4 flex-shrink-0" />
+                  <span className="text-sm flex-1">{c}</span>
+                </label>
+              )
+            })}
+          </div>
         </div>
         <div className="form-group">
           <label className="label label-required">الغرض من البحث</label>

@@ -91,6 +91,8 @@ func main() {
 	mux.Handle("PUT /api/requests/{id}/dept-send", role("department_head")(http.HandlerFunc(handlers.DeptHeadSendToDeputy)))
 	// الباحث يحيل البحث للمعاون للتدقيق النهائي
 	mux.Handle("PUT /api/research-tasks/{id}/refer-assistant", role("researcher")(http.HandlerFunc(handlers.ReferToAssistant)))
+	// الباحث يربط ملف بمهمة بحثه
+	mux.Handle("PUT /api/research-tasks/{id}/file", role("researcher")(http.HandlerFunc(handlers.AttachResearchFile)))
 
 	// =============================================
 	// المستخدمين - Users

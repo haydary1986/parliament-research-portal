@@ -126,6 +126,11 @@ export function getResearchTask(id) {
   return request('GET', `/research-tasks/${id}`);
 }
 
+// ربط ملف بمهمة بحث (بعد رفعه)
+export function attachResearchFile(id, filename) {
+  return request('PUT', `/research-tasks/${id}/file`, { file_path: filename });
+}
+
 export function updateResearchTaskStatus(id, status) {
   return request('PUT', `/research-tasks/${id}/status`, { status });
 }

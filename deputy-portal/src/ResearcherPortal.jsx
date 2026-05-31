@@ -8,7 +8,7 @@ import { PageLoader } from './components/ui/Spinner'
 import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconResearch, IconMail, IconArchive, IconDocument,
-  IconClock, IconCheck, IconPlus,
+  IconClock, IconCheck, IconPlus, IconUpload,
 } from './components/icons/Icons'
 import { formatDate, formatDateTime } from './lib/format'
 import * as api from './api'
@@ -235,9 +235,19 @@ function TaskDetailModal({ task, onClose, onChanged }) {
           )}
 
           {t.status === 'in_progress' && (
-            <div className="card p-4 bg-[var(--color-navy-50)] border-[var(--color-navy-200)]">
+            <div className="card p-4 bg-[var(--color-navy-50)] border-[var(--color-navy-200)] space-y-3">
+              <ResearchFileUpload task={t} onChanged={onChanged} />
               <div className="flex gap-3">
-                <button onClick={() => updateStatus('submitted')} disabled={busy} className="btn-success flex-1">
+                <button
+                  onClick={() => {
+                    if (!t.file_path) {
+                      if (!window.confirm('لم ترفع ملف البحث بعد. هل تريد التسليم بدون مرفق؟')) return
+                    }
+                    updateStatus('submitted')
+                  }}
+                  disabled={busy}
+                  className="btn-success flex-1"
+                >
                   تسليم البحث للمراجعة
                 </button>
                 <button onClick={() => setShowInfo(true)} disabled={(t.information_requests || []).length >= 3} className="btn-outline flex-1">
@@ -369,6 +379,61 @@ function TaskDetailModal({ task, onClose, onChanged }) {
         </div>
       )}
     </Modal>
+  )
+}
+
+function ResearchFileUpload({ task, onChanged }) {
+  const [uploading, setUploading] = useState(false)
+  const toast = useToast()
+
+  const onFile = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 10 * 1024 * 1024) {
+      return toast.error('حجم الملف يتجاوز 10MB')
+    }
+    setUploading(true)
+    try {
+      const up = await api.uploadFile(file)
+      if (up.success && up.data?.filename) {
+        await api.attachResearchFile(task.id, up.data.filename)
+        toast.success('تم رفع الملف بنجاح')
+        onChanged?.()
+      } else {
+        toast.error(up.message || 'فشل رفع الملف')
+      }
+    } catch (err) { toast.error(err.message || 'فشل رفع الملف') }
+    finally { setUploading(false); e.target.value = '' }
+  }
+
+  return (
+    <div className="card p-3 bg-white border-[var(--color-border)]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <span className="text-2xl">📎</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-[var(--color-navy-500)] font-semibold">ملف البحث</p>
+            {task.file_path ? (
+              <a
+                href={api.getFileUrl(task.file_path)}
+                target="_blank" rel="noreferrer"
+                className="text-sm font-mono text-[var(--color-navy-900)] hover:text-[var(--color-gold-700)] truncate block"
+              >
+                {task.file_path}
+              </a>
+            ) : (
+              <p className="text-sm text-[var(--color-navy-400)]">لم يُرفَع ملف بعد</p>
+            )}
+          </div>
+        </div>
+        <label className="btn-outline btn-sm cursor-pointer">
+          <IconUpload className="w-4 h-4" />
+          <span>{uploading ? 'جاري...' : (task.file_path ? 'استبدال' : 'رفع ملف')}</span>
+          <input type="file" accept=".pdf,.doc,.docx" onChange={onFile} disabled={uploading} className="sr-only" />
+        </label>
+      </div>
+      <p className="text-[10px] text-[var(--color-navy-500)] mt-2">PDF / DOC / DOCX (حد أقصى 10MB)</p>
+    </div>
   )
 }
 

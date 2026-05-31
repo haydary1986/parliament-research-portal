@@ -398,6 +398,49 @@ func UpdateInfoRequestResponse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم تحديث حالة الرد"})
 }
 
+// PUT /api/research-tasks/{id}/file - ربط ملف بمهمة البحث
+func AttachResearchFile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	var assignedResearcher int
+	if err := db.DB.QueryRow("SELECT researcher_id FROM research_tasks WHERE id = ?", id).Scan(&assignedResearcher); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المهمة غير موجودة"})
+		return
+	}
+	if assignedResearcher != userID {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بتعديل هذه المهمة"})
+		return
+	}
+
+	var input struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
+		return
+	}
+	if input.FilePath == "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "اسم الملف مطلوب"})
+		return
+	}
+
+	if _, err := db.DB.Exec(
+		"UPDATE research_tasks SET file_path = ?, updated_at = ? WHERE id = ?",
+		input.FilePath, time.Now(), id,
+	); err != nil {
+		log.Printf("AttachResearchFile failed: %v", err)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل ربط الملف"})
+		return
+	}
+
+	var userName string
+	logErr("AttachResearchFile userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+	logActivity(userID, userName, "attach_file", strPtr("research_task"), &id, "ربط ملف البحث: "+input.FilePath)
+
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم رفع الملف بنجاح"})
+}
+
 // PUT /api/research-tasks/{id}/refer-assistant - الباحث يحيل للمعاون للتدقيق النهائي
 // (نقطة 4 من بوابة الباحث في req.md)
 func ReferToAssistant(w http.ResponseWriter, r *http.Request) {
