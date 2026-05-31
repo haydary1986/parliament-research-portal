@@ -73,7 +73,7 @@ export default function AssistantManagerPortal({ user, onLogout }) {
     >
       {loading ? <PageLoader /> : tab === 'dashboard' ? (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <StatCard label="بانتظار تدقيقي" value={pendingMyReview.length} tone="warning" icon={<IconClock />} />
             <StatCard label="بحوث قيد التنفيذ" value={inProcess.length} tone="info" icon={<IconDocument />} />
             <StatCard label="دققتها" value={completedByMe.length} tone="success" icon={<IconCheck />} />

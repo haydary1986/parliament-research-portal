@@ -73,7 +73,7 @@ export default function ProofreaderPortal({ user, onLogout }) {
     >
       {loading ? <PageLoader /> : tab === 'dashboard' ? (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <StatCard label="مهام جديدة" value={pending.length} tone="warning" icon={<IconClock />} />
             <StatCard label="قيد التدقيق" value={inProgress.length} tone="info" icon={<IconProofread />} />
             <StatCard label="مكتملة" value={completed.length} tone="success" icon={<IconCheck />} />

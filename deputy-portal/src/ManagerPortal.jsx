@@ -108,7 +108,7 @@ function ManagerDashboard({ stats, requests, departments, onOpen }) {
   const returnedCount = requests.filter((r) => r.status === 'returned_exists').length
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 sm:gap-4">
         <StatCard label={MANAGER_DASHBOARD_LABELS.total} value={s.total_requests || 0} tone="navy" icon={<IconDocument />} />
         <StatCard label={MANAGER_DASHBOARD_LABELS.pending} value={s.pending_requests || 0} tone="warning" icon={<IconClock />} />
         <StatCard label={MANAGER_DASHBOARD_LABELS.in_progress} value={s.in_progress_count || 0} tone="info" icon={<IconActivity />} />

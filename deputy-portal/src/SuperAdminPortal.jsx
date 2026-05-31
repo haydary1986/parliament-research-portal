@@ -116,7 +116,7 @@ function AdminDashboard({ stats, users, departments, activity }) {
   const s = stats || {}
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
         <StatCard label="المستخدمون" value={users.length} tone="navy" icon={<IconUsers />} />
         <StatCard label="الأقسام" value={departments.length} tone="gold" icon={<IconBuilding />} />
         <StatCard label="الطلبات" value={s.total_requests || 0} tone="info" icon={<IconDocument />} />

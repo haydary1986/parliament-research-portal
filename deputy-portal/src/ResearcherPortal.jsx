@@ -74,7 +74,7 @@ export default function ResearcherPortal({ user, onLogout }) {
     >
       {loading ? <PageLoader /> : tab === 'dashboard' ? (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
             <StatCard label="مهام نشطة" value={activeTasks.length} tone="warning" icon={<IconClock />} />
             <StatCard label="مكتملة" value={completed.length} tone="success" icon={<IconCheck />} />
             <StatCard label="بانتظار موافقتك" value={awaitingConsent.length} tone="info" icon={<IconArchive />} />

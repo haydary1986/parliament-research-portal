@@ -118,7 +118,7 @@ function DashboardView({ stats, requests, onOpen }) {
   const recent = requests.slice(0, 5)
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard label="إجمالي الطلبات" value={stats.total} tone="navy" icon={<IconDocument />} />
         <StatCard label="قيد الانتظار" value={stats.pending} tone="warning" icon={<IconClock />} />
         <StatCard label="قيد التنفيذ" value={stats.inProgress} tone="info" icon={<IconActivity />} />
