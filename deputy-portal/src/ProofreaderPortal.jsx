@@ -19,15 +19,23 @@ export default function ProofreaderPortal({ user, onLogout }) {
   const [active, setActive] = useState(null)
   const toast = useToast()
 
-  const refresh = async () => {
-    setLoading(true)
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const r = await api.getProofreadingTasks()
       if (r.success) setTasks(r.data || [])
-    } catch (e) { toast.error(e.message) }
-    finally { setLoading(false) }
+    } catch (e) {
+      if (!silent) toast.error(e.message)
+    }
+    finally { if (!silent) setLoading(false) }
   }
-  useEffect(() => { refresh() }, [])
+
+  useEffect(() => {
+    refresh()
+    // auto-refresh كل 30 ثانية لكي تظهر المهام الجديدة بدون reload يدوي
+    const interval = setInterval(() => refresh(true), 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const pending = tasks.filter((t) => t.status === 'pending')
   const inProgress = tasks.filter((t) => t.status === 'in_progress')

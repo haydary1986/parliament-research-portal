@@ -19,16 +19,22 @@ export default function AssistantManagerPortal({ user, onLogout }) {
   const [active, setActive] = useState(null)
   const toast = useToast()
 
-  const refresh = async () => {
-    setLoading(true)
+  const refresh = async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const r = await api.getRequests({ limit: 200 })
       if (r.success) setRequests(r.data || [])
-    } catch (e) { toast.error(e.message) }
-    finally { setLoading(false) }
+    } catch (e) {
+      if (!silent) toast.error(e.message)
+    }
+    finally { if (!silent) setLoading(false) }
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    refresh()
+    const interval = setInterval(() => refresh(true), 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   // المعاون يهتم بالـ pending_assistant + ما سبقها وما بعدها
   const pendingMyReview = requests.filter((r) => r.status === 'pending_assistant')

@@ -33,7 +33,13 @@ export default function DeputyPortal({ user, onLogout }) {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    refresh()
+    const interval = setInterval(() => {
+      api.getRequests({ limit: 100 }).then((r) => { if (r.success) setRequests(r.data || []) }).catch(() => {})
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const stats = {
     total: requests.length,

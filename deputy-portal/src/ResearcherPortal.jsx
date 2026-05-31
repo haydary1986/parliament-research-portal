@@ -29,7 +29,13 @@ export default function ResearcherPortal({ user, onLogout }) {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    refresh()
+    const interval = setInterval(() => {
+      api.getResearchTasks().then((r) => { if (r.success) setTasks(r.data || []) }).catch(() => {})
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const myTasks = tasks
   const activeTasks = myTasks.filter((t) => ['assigned', 'in_progress'].includes(t.status))

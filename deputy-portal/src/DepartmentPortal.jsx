@@ -42,7 +42,15 @@ export default function DepartmentPortal({ user, onLogout }) {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { refresh() }, [user?.department_id])
+  useEffect(() => {
+    refresh()
+    const interval = setInterval(() => {
+      // silent refresh - فقط إعادة جلب البيانات
+      api.getRequests({ limit: 200 }).then((r) => { if (r.success) setRequests(r.data || []) }).catch(() => {})
+      api.getResearchTasks().then((r) => { if (r.success) setResearchTasks(r.data || []) }).catch(() => {})
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [user?.department_id])
 
   const incoming = requests.filter((r) => r.status === 'assigned')
   const inProgress = requests.filter((r) => ['confirmed', 'in_progress', 'review', 'pending_dept_review', 'proofreading'].includes(r.status))

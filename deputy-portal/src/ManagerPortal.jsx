@@ -38,7 +38,14 @@ export default function ManagerPortal({ user, onLogout }) {
     } finally { setLoading(false) }
   }
 
-  useEffect(() => { refresh() }, [])
+  useEffect(() => {
+    refresh()
+    const interval = setInterval(() => {
+      api.getRequests({ limit: 200 }).then((r) => { if (r.success) setRequests(r.data || []) }).catch(() => {})
+      api.getDashboardStats().then((r) => { if (r.success) setStats(r.data) }).catch(() => {})
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const pending = requests.filter((r) => r.status === 'pending')
   const reviews = requests.filter((r) => r.status === 'under_manager_review')
