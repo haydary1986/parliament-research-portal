@@ -5,13 +5,15 @@ import StatCard from './components/ui/StatCard'
 import Modal from './components/ui/Modal'
 import EmptyState from './components/ui/EmptyState'
 import { PageLoader } from './components/ui/Spinner'
+import ResearchFiles from './components/ui/ResearchFiles'
+import Discussion from './components/ui/Discussion'
 import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconRequests, IconPlus, IconDocument, IconClock,
   IconCheck, IconActivity, IconSearch,
 } from './components/icons/Icons'
 import {
-  formatDate, formatDateTime, PURPOSE_LABELS, REQUEST_STAGES, getRequestStage,
+  formatDate, PURPOSE_LABELS, REQUEST_STAGES, getRequestStage,
   CONFIDENTIALITY_LABELS,
 } from './lib/format'
 import { COMMITTEES } from './lib/committees'
@@ -112,7 +114,11 @@ export default function DeputyPortal({ user, onLogout }) {
             : (user?.committee ? [user.committee] : [])
         }
       />
-      <RequestDetailModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />
+      <RequestDetailModal
+        request={selectedRequest}
+        onClose={() => setSelectedRequest(null)}
+        onChanged={refresh}
+      />
     </PortalLayout>
   )
 }
@@ -414,9 +420,17 @@ function StageTracker({ status, lettersCount = 0 }) {
   )
 }
 
-function RequestDetailModal({ request, onClose }) {
+function RequestDetailModal({ request, onClose, onChanged }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const toast = useToast()
+
+  const reload = () => {
+    if (!request) return
+    api.getRequest(request.id).then((r) => { if (r.success) setDetail(r.data) }).catch(() => {})
+    onChanged?.()
+  }
 
   useEffect(() => {
     if (!request) return
@@ -479,20 +493,46 @@ function RequestDetailModal({ request, onClose }) {
             </div>
           )}
 
-          {d.notes && d.notes.length > 0 && (
-            <div>
-              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-800)]">الملاحظات والإجراءات</h4>
-              <div className="space-y-2">
-                {d.notes.map((n) => (
-                  <div key={n.id} className="p-3 bg-[var(--color-surface-soft)] rounded-lg border border-[var(--color-border)]">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <span className="font-semibold text-sm text-[var(--color-navy-900)]">{n.user_name}</span>
-                      <span className="text-[10px] text-[var(--color-navy-500)]">{formatDateTime(n.created_at)}</span>
-                    </div>
-                    <p className="text-sm text-[var(--color-navy-700)]">{n.content}</p>
-                  </div>
-                ))}
-              </div>
+          {/* مخرَج الطلب: كان النائب لا يستطيع تنزيل بحثه إطلاقاً */}
+          <ResearchFiles
+            files={d.files}
+            title="ملف البحث المُسلَّم"
+            emptyText={['delivered', 'completed'].includes(d.status)
+              ? 'لم يُرفق ملف بهذا البحث — راجع دائرة البحوث'
+              : 'سيظهر ملف البحث هنا فور تسليمه'}
+          />
+
+          <Discussion
+            entityType="request"
+            entityId={d.id}
+            notes={d.notes || []}
+            onAdded={reload}
+            placeholder="استفسار أو توضيح إضافي حول طلبك..."
+          />
+
+          {d.status === 'pending' && (
+            <div className="card p-4 bg-[var(--color-danger-50)] border-[var(--color-danger-600)]">
+              <h4 className="font-bold text-sm mb-1 text-[var(--color-navy-900)]">سحب الطلب</h4>
+              <p className="text-xs text-[var(--color-navy-700)] mb-3">
+                يمكنك سحب الطلب ما دام لم يُحَل إلى قسم بعد. بعد الإحالة راجع مدير الدائرة.
+              </p>
+              <button
+                onClick={async () => {
+                  if (!window.confirm('هل تريد سحب هذا الطلب؟ لا يمكن التراجع.')) return
+                  setBusy(true)
+                  try {
+                    await api.withdrawRequest(d.id)
+                    toast.success('تم سحب الطلب')
+                    onChanged?.()
+                    onClose()
+                  } catch (e) { toast.error(e.message) }
+                  finally { setBusy(false) }
+                }}
+                disabled={busy}
+                className="btn-danger w-full"
+              >
+                {busy ? 'جاري السحب...' : 'سحب الطلب'}
+              </button>
             </div>
           )}
         </div>

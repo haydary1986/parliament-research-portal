@@ -5,13 +5,16 @@ import StatCard from './components/ui/StatCard'
 import Modal from './components/ui/Modal'
 import EmptyState from './components/ui/EmptyState'
 import { PageLoader } from './components/ui/Spinner'
+import ResearchFiles from './components/ui/ResearchFiles'
+import Discussion from './components/ui/Discussion'
+import OperationsReport from './components/reports/OperationsReport'
 import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconRequests, IconDocument, IconClock, IconCheck, IconActivity,
   IconSearch, IconBuilding, IconArchive, IconShield, IconUsers,
 } from './components/icons/Icons'
 import {
-  formatDate, formatDateTime, PURPOSE_LABELS, MANAGER_DASHBOARD_LABELS,
+  formatDate, PURPOSE_LABELS, MANAGER_DASHBOARD_LABELS,
   CONFIDENTIALITY_LABELS, REQUESTER_TYPES, SERVICE_TYPES, CLASSIFICATIONS,
 } from './lib/format'
 import { COMMITTEES } from './lib/committees'
@@ -64,6 +67,7 @@ export default function ManagerPortal({ user, onLogout }) {
     { key: 'pending', label: 'طلبات قيد الإحالة', icon: IconClock, badge: pending.length },
     { key: 'to_send', label: 'بحوث للإرسال للنائب', icon: IconShield, badge: toSend.length },
     { key: 'all', label: 'جميع الطلبات', icon: IconRequests },
+    { key: 'reports', label: 'التقارير والتصدير', icon: IconActivity },
     { key: 'departments', label: 'الأقسام', icon: IconBuilding },
     { key: 'archive', label: 'البحث في الأرشيف', icon: IconArchive },
   ]
@@ -78,6 +82,7 @@ export default function ManagerPortal({ user, onLogout }) {
     to_send: { title: 'بحوث بانتظار إرسالك للنائب', subtitle: 'بحوث ذات خصوصية وحساسية اعتمدها المعاون' },
     reviews: { title: 'المراجعات النهائية', subtitle: 'بحوث بانتظار الاعتماد النهائي قبل التسليم' },
     all: { title: 'جميع الطلبات', subtitle: 'سجل كامل لكل الطلبات في الدائرة' },
+    reports: { title: 'التقارير التشغيلية', subtitle: 'أداء الأقسام والباحثين، الطلبات المتأخرة، وتصدير كامل البيانات' },
     departments: { title: 'أقسام الدائرة', subtitle: 'إدارة الأقسام البحثية' },
     archive: { title: 'الأرشيف الرقمي', subtitle: 'البحث في البحوث المكتملة المؤرشفة' },
   }
@@ -100,6 +105,7 @@ export default function ManagerPortal({ user, onLogout }) {
           {tab === 'to_send' && <RequestsTable rows={toSend} departments={departments} onOpen={setActiveRequest} emptyText="لا توجد بحوث بانتظار إرسالك" />}
           {tab === 'reviews' && <RequestsTable rows={reviews} departments={departments} onOpen={setActiveRequest} emptyText="لا توجد مراجعات نهائية معلقة" />}
           {tab === 'all' && <RequestsTable rows={requests} departments={departments} onOpen={setActiveRequest} withFilter />}
+          {tab === 'reports' && <OperationsReport />}
           {tab === 'departments' && <DepartmentsView departments={departments} requests={requests} />}
           {tab === 'archive' && <ArchiveSearch />}
         </>
@@ -700,22 +706,14 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
             </div>
           )}
 
-          {d.notes && d.notes.length > 0 && (
-            <div>
-              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-800)]">الملاحظات</h4>
-              <div className="space-y-2">
-                {d.notes.map((n) => (
-                  <div key={n.id} className="p-3 bg-[var(--color-surface-soft)] rounded-lg border border-[var(--color-border)]">
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <span className="font-semibold text-sm text-[var(--color-navy-900)]">{n.user_name}</span>
-                      <span className="text-[10px] text-[var(--color-navy-500)]">{formatDateTime(n.created_at)}</span>
-                    </div>
-                    <p className="text-sm text-[var(--color-navy-700)]">{n.content}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <ResearchFiles files={d.files} title="ملفات البحث" />
+
+          <Discussion
+            entityType="request"
+            entityId={d.id}
+            notes={d.notes || []}
+            onAdded={() => api.getRequest(d.id).then((x) => { if (x.success) setDetail(x.data) }).catch(() => {})}
+          />
         </div>
       )}
     </Modal>

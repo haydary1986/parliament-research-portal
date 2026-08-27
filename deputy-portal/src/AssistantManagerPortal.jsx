@@ -5,11 +5,13 @@ import StatCard from './components/ui/StatCard'
 import Modal from './components/ui/Modal'
 import EmptyState from './components/ui/EmptyState'
 import { PageLoader } from './components/ui/Spinner'
+import ResearchFiles from './components/ui/ResearchFiles'
+import Discussion from './components/ui/Discussion'
 import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconShield, IconClock, IconCheck, IconDocument, IconActivity,
 } from './components/icons/Icons'
-import { formatDate, formatDateTime, PURPOSE_LABELS, CONFIDENTIALITY_LABELS, REQUESTER_TYPES } from './lib/format'
+import { formatDate, PURPOSE_LABELS, CONFIDENTIALITY_LABELS, REQUESTER_TYPES } from './lib/format'
 import * as api from './api'
 
 export default function AssistantManagerPortal({ user, onLogout }) {
@@ -273,22 +275,19 @@ function ReviewModal({ request, onClose, onChanged }) {
             </div>
           )}
 
-          {d.notes && d.notes.length > 0 && (
-            <div>
-              <h4 className="font-bold text-sm mb-3">سجل الملاحظات</h4>
-              <div className="space-y-2">
-                {d.notes.map((n) => (
-                  <div key={n.id} className="p-3 bg-[var(--color-surface-soft)] rounded-lg border border-[var(--color-border)]">
-                    <div className="flex justify-between gap-2 mb-1">
-                      <span className="font-semibold text-sm">{n.user_name}</span>
-                      <span className="text-[10px] text-[var(--color-navy-500)]">{formatDateTime(n.created_at)}</span>
-                    </div>
-                    <p className="text-sm">{n.content}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* المعاون يمنح الاعتماد النهائي — فلا يصح أن يقرر بلا مستند */}
+          <ResearchFiles
+            files={d.files}
+            title="ملف البحث للتدقيق النهائي"
+            emptyText="لم يُرفق ملف بهذا البحث — لا تعتمده قبل التحقق"
+          />
+
+          <Discussion
+            entityType="request"
+            entityId={d.id}
+            notes={d.notes || []}
+            onAdded={() => api.getRequest(d.id).then((x) => { if (x.success) setDetail(x.data) }).catch(() => {})}
+          />
         </div>
       )}
     </Modal>

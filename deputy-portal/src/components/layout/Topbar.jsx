@@ -5,6 +5,7 @@ import { useToast } from '../ui/Toast'
 
 export default function Topbar({ title, subtitle, actions, onChangePassword, onMenuClick }) {
   const [notifs, setNotifs] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const toast = useToast()
@@ -13,8 +14,11 @@ export default function Topbar({ title, subtitle, actions, onChangePassword, onM
     let cancelled = false
     const load = async () => {
       try {
-        const r = await api.getNotifications()
-        if (!cancelled && r.success) setNotifs(r.data || [])
+        const r = await api.getNotifications({ limit: 30 })
+        if (!cancelled && r.success) {
+          setNotifs(r.data || [])
+          setUnreadCount(r.unread ?? (r.data || []).filter((n) => !n.is_read).length)
+        }
       } catch {
         // silent polling failure
       }
@@ -30,14 +34,25 @@ export default function Topbar({ title, subtitle, actions, onChangePassword, onM
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
 
-  const unread = notifs.filter((n) => !n.is_read).length
+  const unread = unreadCount
 
   const markRead = async (id) => {
     try {
       await api.markNotificationRead(id)
       setNotifs((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)))
+      setUnreadCount((c) => Math.max(0, c - 1))
     } catch {
       toast.error('فشل تحديث الإشعار')
+    }
+  }
+
+  const markAll = async () => {
+    try {
+      await api.markAllNotificationsRead()
+      setNotifs((prev) => prev.map((n) => ({ ...n, is_read: true })))
+      setUnreadCount(0)
+    } catch {
+      toast.error('فشل تحديث الإشعارات')
     }
   }
 
@@ -86,7 +101,11 @@ export default function Topbar({ title, subtitle, actions, onChangePassword, onM
             <div className="fixed md:absolute inset-x-2 md:inset-x-auto md:left-0 top-16 md:top-12 md:w-96 card shadow-xl z-30 animate-fade-in overflow-hidden">
               <div className="card-header py-3">
                 <h4 className="font-bold text-sm">الإشعارات</h4>
-                {unread > 0 && <span className="badge-info">{unread} غير مقروء</span>}
+                {unread > 0 && (
+                  <button onClick={markAll} className="btn-ghost btn-sm">
+                    تعليم الكل كمقروء ({unread})
+                  </button>
+                )}
               </div>
               <div className="max-h-96 overflow-y-auto">
                 {notifs.length === 0 ? (

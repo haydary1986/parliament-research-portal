@@ -5,12 +5,14 @@ import StatCard from './components/ui/StatCard'
 import Modal from './components/ui/Modal'
 import EmptyState from './components/ui/EmptyState'
 import { PageLoader } from './components/ui/Spinner'
+import ResearchFiles from './components/ui/ResearchFiles'
+import Discussion from './components/ui/Discussion'
 import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconRequests, IconResearch, IconProofread, IconUsers,
   IconDocument, IconClock, IconCheck, IconPlus, IconSearch,
 } from './components/icons/Icons'
-import { formatDate, formatDateTime, SERVICE_TYPES, CLASSIFICATIONS } from './lib/format'
+import { formatDate, SERVICE_TYPES, CLASSIFICATIONS } from './lib/format'
 import * as api from './api'
 
 export default function DepartmentPortal({ user, onLogout }) {
@@ -509,22 +511,19 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
             <Field label="تاريخ الإحالة" value={formatDate(d.referral_date)} />
           </div>
 
-          {d.notes && d.notes.length > 0 && (
-            <div>
-              <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-800)]">الملاحظات</h4>
-              <div className="space-y-2">
-                {d.notes.map((n) => (
-                  <div key={n.id} className="p-3 bg-[var(--color-surface-soft)] rounded-lg border border-[var(--color-border)]">
-                    <div className="flex justify-between gap-2 mb-1">
-                      <span className="font-semibold text-sm">{n.user_name}</span>
-                      <span className="text-[10px] text-[var(--color-navy-500)]">{formatDateTime(n.created_at)}</span>
-                    </div>
-                    <p className="text-sm text-[var(--color-navy-700)]">{n.content}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* رئيس القسم يعتمد البحث — فيجب أن يراه أولاً */}
+          <ResearchFiles
+            files={d.files}
+            title="ملف البحث المسلَّم"
+            emptyText={d.status === 'pending_dept_review' ? 'لم يُرفق ملف — راجع الباحث قبل الاعتماد' : undefined}
+          />
+
+          <Discussion
+            entityType="request"
+            entityId={d.id}
+            notes={d.notes || []}
+            onAdded={() => api.getRequest(d.id).then((x) => { if (x.success) setDetail(x.data) }).catch(() => {})}
+          />
         </div>
       )}
     </Modal>

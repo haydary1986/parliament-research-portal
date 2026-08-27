@@ -10,6 +10,8 @@ import {
   IconDocument, IconPlus, IconSearch, IconParliament,
 } from './components/icons/Icons'
 import { formatDate, formatDateTime, ROLE_LABELS, REQUESTER_TYPES } from './lib/format'
+import DepartmentsAdmin from './components/admin/DepartmentsAdmin'
+import EditUserModal from './components/admin/EditUserModal'
 import { COMMITTEES } from './lib/committees'
 import * as api from './api'
 import * as XLSX from 'xlsx'
@@ -90,7 +92,7 @@ export default function SuperAdminPortal({ user, onLogout }) {
         <>
           {tab === 'dashboard' && <AdminDashboard stats={stats} users={users} departments={departments} activity={activity} />}
           {tab === 'users' && <UsersView users={users} onChanged={refresh} />}
-          {tab === 'departments' && <DepartmentsView departments={departments} users={users} />}
+          {tab === 'departments' && <DepartmentsAdmin departments={departments} users={users} onChanged={refresh} />}
           {tab === 'activity' && <ActivityView logs={activity} />}
           {tab === 'security' && <SecurityView security={security} />}
         </>
@@ -173,6 +175,7 @@ function UsersView({ users, onChanged }) {
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
   const [resetUser, setResetUser] = useState(null)
+  const [editUser, setEditUser] = useState(null)
   const toast = useToast()
 
   const filtered = users.filter((u) => {
@@ -207,6 +210,7 @@ function UsersView({ users, onChanged }) {
       </div>
 
       <ResetPasswordModal user={resetUser} onClose={() => setResetUser(null)} onSaved={onChanged} />
+      <EditUserModal user={editUser} onClose={() => setEditUser(null)} onSaved={onChanged} />
 
       <div className="table-wrap">
         <table className="table">
@@ -249,8 +253,11 @@ function UsersView({ users, onChanged }) {
                 <td className="text-xs">{u.last_login ? formatDate(u.last_login) : '—'}</td>
                 <td>
                   <div className="flex items-center gap-1">
+                    <button onClick={() => setEditUser(u)} className="btn-ghost btn-sm" title="تعديل البيانات">
+                      تعديل
+                    </button>
                     <button onClick={() => setResetUser(u)} className="btn-ghost btn-sm" title="إعادة تعيين كلمة المرور">
-                      🔑
+                      كلمة المرور
                     </button>
                     <button onClick={() => toggleStatus(u)} className="btn-ghost btn-sm">
                       {u.status === 'active' ? 'تعطيل' : 'تفعيل'}
@@ -262,54 +269,6 @@ function UsersView({ users, onChanged }) {
           </tbody>
         </table>
       </div>
-    </div>
-  )
-}
-
-function DepartmentsView({ departments, users }) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {departments.map((d) => {
-        const members = users.filter((u) => u.department_id === d.id)
-        return (
-          <div key={d.id} className="card overflow-hidden">
-            <div className="h-1.5" style={{ background: d.color }} />
-            <div className="p-5">
-              <div className="flex items-start gap-3 mb-4">
-                <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ background: d.color + '20', color: d.color }}>
-                  <IconBuilding className="w-6 h-6" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="font-bold text-[var(--color-navy-900)]">{d.name}</h3>
-                  <p className="text-xs text-[var(--color-navy-500)] mt-0.5">{d.head_name}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2 mb-3 pt-3 border-t border-[var(--color-border)]">
-                <div>
-                  <p className="text-2xl font-bold text-[var(--color-navy-900)]">{d.researcher_count}</p>
-                  <p className="text-[10px] text-[var(--color-navy-500)] uppercase">باحث</p>
-                </div>
-                <div>
-                  <p className="text-2xl font-bold text-[var(--color-gold-700)]">{d.active_requests}</p>
-                  <p className="text-[10px] text-[var(--color-navy-500)] uppercase">طلب نشط</p>
-                </div>
-              </div>
-              <div className="flex -space-x-2 space-x-reverse">
-                {members.slice(0, 5).map((m) => (
-                  <div key={m.id} className="w-7 h-7 rounded-full bg-[var(--color-navy-100)] text-[var(--color-navy-700)] border-2 border-white flex items-center justify-center text-[10px] font-bold" title={m.name}>
-                    {m.name[0]}
-                  </div>
-                ))}
-                {members.length > 5 && (
-                  <div className="w-7 h-7 rounded-full bg-[var(--color-navy-700)] text-white border-2 border-white flex items-center justify-center text-[10px] font-bold">
-                    +{members.length - 5}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }

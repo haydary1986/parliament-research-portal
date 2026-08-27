@@ -161,12 +161,48 @@ export function updateProofreadingStatus(id, data) {
 }
 
 // ========== Notifications ==========
-export function getNotifications() {
-  return request('GET', '/notifications');
+export function getNotifications(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request('GET', `/notifications${query ? '?' + query : ''}`);
 }
 
 export function markNotificationRead(id) {
   return request('PUT', `/notifications/${id}/read`);
+}
+
+export function markAllNotificationsRead() {
+  return request('PUT', '/notifications/read-all');
+}
+
+// ========== سحب الطلب (الجهة الطالبة) ==========
+export function withdrawRequest(id, reason = '') {
+  return request('PUT', `/requests/${id}/withdraw`, { reason });
+}
+
+// ========== إدارة المستخدمين والأقسام (أدمن) ==========
+export function updateUser(id, data) {
+  return request('PUT', `/users/${id}`, data);
+}
+
+export function createDepartment(data) {
+  return request('POST', '/departments', data);
+}
+
+export function updateDepartment(id, data) {
+  return request('PUT', `/departments/${id}`, data);
+}
+
+export function deleteDepartment(id) {
+  return request('DELETE', `/departments/${id}`);
+}
+
+// ========== التقارير (مدير + أدمن) ==========
+export function getOperationsReport() {
+  return request('GET', '/reports/operations');
+}
+
+export function exportRequests() {
+  return request('GET', '/reports/requests-export');
 }
 
 // ========== Notes ==========

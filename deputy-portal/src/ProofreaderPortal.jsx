@@ -174,6 +174,28 @@ function TaskModal({ task, onClose, onChanged }) {
           <Field label="تاريخ الإنجاز" value={formatDate(task.completed_date)} />
         </div>
 
+        {/* ملف البحث المطلوب تدقيقه — كان المدقق يُكلَّف بمستند لا يراه */}
+        {task.research_file ? (
+          <div className="card p-4">
+            <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-800)]">المستند المطلوب تدقيقه</h4>
+            <a
+              href={api.getFileUrl(task.research_file)}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-primary w-full justify-center"
+            >
+              <IconDocument className="w-4 h-4" aria-hidden="true" />
+              <span>فتح ملف البحث</span>
+            </a>
+          </div>
+        ) : (
+          <div className="card p-4 bg-[var(--color-warning-50)] border-[var(--color-warning-600)]">
+            <p className="text-sm font-semibold text-[var(--color-warning-700)]">
+              لم يُرفق ملف بهذا البحث — راجع رئيس القسم قبل التدقيق
+            </p>
+          </div>
+        )}
+
         <div>
           <label className="label">ملاحظات التدقيق</label>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="textarea" rows={5} placeholder="اكتب ملاحظاتك على البحث..." />
