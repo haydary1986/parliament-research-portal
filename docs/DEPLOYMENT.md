@@ -122,7 +122,7 @@ docker compose down -v
 
 - Coolify instance يعمل (مثل `docker.erticaz.com`)
 - API key (للنشر التلقائي عبر API)
-- دومين/subdomain يشير لـ Coolify (مثل `perl.algonest.tech`)
+- دومين/subdomain يشير لـ Coolify (مثل `ppp.algonest.tech`)
 
 ### الطريقة 1: عبر Coolify UI
 
@@ -142,14 +142,14 @@ docker compose down -v
 | Key | Value | ملاحظات |
 |------|-------|--------|
 | `JWT_SECRET` | (32 حرف عشوائي) | استخدم `openssl rand -hex 32` |
-| `ALLOWED_ORIGIN` | `https://perl.algonest.tech` | الدومين الإنتاجي |
+| `ALLOWED_ORIGIN` | `https://ppp.algonest.tech` | الدومين الإنتاجي |
 | `GO_ENV` | `production` | |
 | `NO_SEED` | `false` (أو `true` بعد أول تشغيل) | |
 
 #### الخطوة 3: تعيين الدومين
 
 في **Domains**:
-- Add `perl.algonest.tech`
+- Add `ppp.algonest.tech`
 - Coolify سيُولِّد SSL تلقائياً (Let's Encrypt)
 - Port: 80 (frontend)
 
@@ -177,10 +177,10 @@ curl -X POST 'https://docker.erticaz.com/api/v1/deploy' \
       "git_repository": "https://github.com/haydary1986/parliament-research-portal",
       "git_branch": "main",
       "build_pack": "dockercompose",
-      "fqdn": "https://perl.algonest.tech",
+      "fqdn": "https://ppp.algonest.tech",
       "environment": [
         {"key": "JWT_SECRET", "value": "..."},
-        {"key": "ALLOWED_ORIGIN", "value": "https://perl.algonest.tech"},
+        {"key": "ALLOWED_ORIGIN", "value": "https://ppp.algonest.tech"},
         {"key": "GO_ENV", "value": "production"}
       ]
     }

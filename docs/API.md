@@ -50,7 +50,11 @@ Authorization: Bearer <JWT_TOKEN>
 Query params: `?status=pending&department=research&page=1&limit=20`
 
 ### GET `/requests/{id}`
-يُرجع الطلب + التأكيد + الملاحظات + قائمة الأقسام المُحالة.
+يُرجع الطلب + التأكيد + الملاحظات + الأقسام المُحالة + **ملفات البحث المرفوعة**
+(`files[]`) + عدد المخاطبات الرسمية.
+
+الوصول مقيّد بالدور: الجهة الطالبة ترى طلباتها، رئيس القسم طلبات أقسامه،
+الباحث والمدقق ما لهم عليه مهمة، والأدوار الإشرافية كل الطلبات.
 
 ### POST `/requests`
 **Roles**: `deputy` (كل الجهات الطالبة تحمل هذا الدور)
@@ -152,8 +156,13 @@ Query params: `?status=pending&department=research&page=1&limit=20`
 ### PUT `/requests/{id}/return`
 **Roles**: `manager`. إرجاع الطلب لعدم إمكانية التنفيذ.
 
-### PUT `/requests/{id}/final-review` (قديم - متوافق)
-**Roles**: `manager`. متوفر للتوافق مع الإصدارات السابقة.
+### PUT `/requests/{id}/withdraw` ⭐ **جديد**
+**Roles**: `deputy`. سحب الطلب من الجهة الطالبة، ما دام `pending`.
+
+```json
+{ "reason": "لم تعد هناك حاجة" }
+```
+
 
 ---
 
@@ -201,9 +210,6 @@ Query params: `?status=pending&department=research&page=1&limit=20`
 ```
 رئيس القسم مقيَّد بباحثي قسمه؛ مدير الدائرة غير مقيد. مرفوض إن كانت المهمة `completed`.
 
-### PUT `/research-tasks/{id}/refer-assistant` (قديم — متوافق)
-**Roles**: `researcher`. المسار السابق للإحالة للمعاون.
-حالياً يحيل المدققُ اللغوي البحثَ إلى المعاون تلقائياً.
 
 ### PUT `/research-tasks/{id}/archive-consent`
 **Roles**: `researcher`. موافقة الباحث على الأرشفة.
@@ -227,7 +233,8 @@ Query params: `?status=pending&department=research&page=1&limit=20`
 ## ✍️ Proofreading (التدقيق اللغوي)
 
 ### GET `/proofreading-tasks`
-**Roles**: `proofreader`, `department_head`, `manager`, `admin`
+**Roles**: `proofreader` (مهامه)، `department_head` (باحثو قسمه)، `manager`، `admin`.
+كل مهمة تحمل `research_file` و`request_id` ليفتح المدقق المستند المطلوب تدقيقه.
 
 ### POST `/proofreading-tasks`
 **Roles**: `department_head`
@@ -261,7 +268,7 @@ Query: `?role=researcher&department=research`
 {
   "name": "...",
   "email": "user@parliament.iq",
-  "password": "min6chars",
+  "password": "min10chars+digits",
   "role": "researcher",
   "department_id": "research",
   "requester_type": "deputy",      // للجهات الطالبة
@@ -293,6 +300,10 @@ Query: `?role=researcher&department=research`
 ```
 الاستجابة تُرجع كلمة المرور المولَّدة لكل حساب — تُعرَض مرة واحدة فقط.
 
+### PUT `/users/{id}` ⭐ **جديد**
+**Roles**: `admin`. تعديل الاسم والبريد والقسم واللجان والهاتف والتخصص.
+الدور غير قابل للتغيير، والحذف غير مدعوم — التعطيل عبر `/status` هو البديل.
+
 ### PUT `/users/{id}/status`
 **Roles**: `admin`, `department_head`
 
@@ -317,6 +328,20 @@ Query: `?role=researcher&department=research`
 ### GET `/departments/{id}`
 يُرجع تفاصيل القسم + قائمة الباحثين.
 
+### POST `/departments` ⭐ **جديد**
+**Roles**: `admin`
+
+```json
+{ "id": "legal_studies", "name": "قسم الدراسات القانونية", "head_name": "...", "color": "#0A2540" }
+```
+`id` مفتاح ثابت: حروف لاتينية صغيرة وأرقام وشرطة سفلية فقط.
+
+### PUT `/departments/{id}` ⭐ **جديد**
+**Roles**: `admin`. تعديل الاسم أو رئيس القسم أو اللون.
+
+### DELETE `/departments/{id}` ⭐ **جديد**
+**Roles**: `admin`. يُرفض إن كان للقسم مستخدمون أو طلبات.
+
 ---
 
 ## 📊 Dashboard & Notifications
@@ -338,8 +363,14 @@ Query: `?role=researcher&department=research`
 ### GET `/notifications`
 **Roles**: أي دور. يُرجع آخر 50 إشعار.
 
+### GET `/notifications?page=1&limit=20&unread=true`
+يدعم الترقيم وفلتر غير المقروء. الاستجابة تحمل `total` و`unread`.
+
 ### PUT `/notifications/{id}/read`
 وضع علامة "مقروء".
+
+### PUT `/notifications/read-all` ⭐ **جديد**
+تعليم كل إشعارات المستخدم كمقروءة.
 
 ### GET `/activity-logs`
 **Roles**: `admin`, `manager`. مع pagination.
@@ -380,17 +411,30 @@ file: <binary>
 
 ## 🔎 Archive Search (الأرشيف)
 
-### GET `/archive/search?q=keyword`
+### GET `/archive/search`
 **Roles**: `manager`, `admin`
 
-البحث في عناوين ووصف البحوث المكتملة المؤرشفة.
+بارامترات: `q` · `department` · `committee` · `from` · `to` · `page` · `limit`.
+يبحث في العنوان والوصف واسم الجهة الطالبة، للبحوث `delivered` و`completed`.
+يجب تحديد معيار واحد على الأقل. الاستجابة مُرقَّمة.
 
 ---
 
 ## 🛡️ Security
 
 ### GET `/security/stats`
-**Roles**: `admin`. عدد IPs المحظورة والمشبوهة.
+**Roles**: `admin`. عدد IPs المحظورة والمشبوهة والحسابات المقفلة.
+
+---
+
+## 📈 Reports (التقارير)
+
+### GET `/reports/operations` ⭐ **جديد**
+**Roles**: `manager`, `admin`. تقرير الأداء: توزيع الحالات واللجان والجهات،
+حِمل الأقسام والباحثين، الطلبات المتأخرة، ومتوسط مدة الإنجاز.
+
+### GET `/reports/requests-export` ⭐ **جديد**
+**Roles**: `manager`, `admin`. صفوف مسطّحة لكل الطلبات جاهزة للتحويل إلى Excel.
 
 ---
 

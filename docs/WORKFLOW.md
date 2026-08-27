@@ -361,11 +361,15 @@ Endpoint: PUT /api/requests/{id}/return
 Transitions: pending → returned_exists
 ```
 
-### تعديل دور المدير (متوافق مع القديم)
+### سحب الطلب من الجهة الطالبة
 
-النظام يدعم Final Review من المدير عبر `PUT /api/requests/{id}/final-review`
-للتوافق مع التدفق القديم. لكن الـ workflow الجديد يستبدله بـ:
-`pending_dept_review` → `pending_assistant` → `pending_dept_send`.
+```
+الفاعل: الجهة الطالبة
+Endpoint: PUT /api/requests/{id}/withdraw
+Validation: الطلب pending + يخص المستخدم
+Transitions: pending → rejected
+```
+بعد الإحالة لا يمكن السحب — المسار عندها عبر مدير الدائرة.
 
 ---
 
@@ -400,5 +404,7 @@ Transitions: pending → returned_exists
 8. ⛔ تعديل الطلب ممنوع بعد `delivered` / `completed` / `returned_exists` / `rejected`
 9. ⛔ التعيين المباشر من المدير مرفوض إن كانت للطلب مهام بحث قائمة
 10. ⛔ إعادة إسناد المهمة ممنوعة بعد اكتمالها
+11. ⛔ ملفات البحث تُتاح لمن يحق له قراءة الطلب فقط (`canAccessRequest`)
+12. ⛔ السحب متاح للجهة الطالبة ما دام الطلب `pending`
 
 كل القيود مفروضة في الـ backend عبر validation + transactions.

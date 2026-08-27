@@ -63,7 +63,12 @@ backend/
     ├── files.go          # رفع وعرض الملفات
     ├── dashboard.go      # الإحصائيات + الإشعارات + سجل النشاط
     ├── archive.go        # البحث في الأرشيف
-    └── helpers.go        # withTx, logErr, sanitize, generateID
+    ├── admin.go          # تعديل المستخدمين + إدارة الأقسام ⭐
+    ├── reports.go        # التقارير التشغيلية والتصدير ⭐
+    ├── security.go       # القائمة السوداء الدائمة + قفل الحساب ⭐
+    ├── sms.go            # إشعارات SMS (إرسال خلفي + إعادة محاولة) ⭐
+    ├── handlers_test.go  # اختبارات الوحدة ⭐
+    └── helpers.go        # withTx, logErr, sanitize, canAccessRequest
 ```
 
 ### Routing
@@ -204,6 +209,13 @@ deputy-portal/src/
                                     │ notifications    │
                                     └──────────────────┘
 ```
+
+### جداول حالة الأمان
+
+| الجدول | الغرض |
+|------|------|
+| `revoked_tokens` | القائمة السوداء الدائمة — تنجو من النشر |
+| `login_attempts` | عدّاد المحاولات وقفل الحساب |
 
 ### الجداول الرئيسية
 
@@ -380,7 +392,7 @@ returned_exists  إن عيّن المدير الباحث)     proofreading
 عند نموّ النظام، نقاط التطوير الموصى بها:
 
 1. **PostgreSQL migration** عند تجاوز 100K طلب
-2. **Redis** للـ JWT blacklist و rate limiting (بدلاً من in-memory)
+2. **Redis** للـ rate limiting (القائمة السوداء صارت في قاعدة البيانات)
 3. **Worker queue** للإشعارات SMS + Email (مثل Asynq)
 4. **Object storage** (S3/MinIO) للملفات المرفوعة
 5. **Microservices split** عند الحاجة (auth, notifications, files)
