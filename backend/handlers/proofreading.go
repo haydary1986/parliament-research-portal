@@ -126,22 +126,42 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 			if err := tx.QueryRow("SELECT research_task_id FROM proofreading_tasks WHERE id = ?", id).Scan(&rtID); err != nil {
 				return fmt.Errorf("lookup research_task_id: %w", err)
 			}
-			// بعد التدقيق اللغوي: المهمة جاهزة، الباحث سيحيلها للمعاون يدوياً (workflow جديد)
 			if _, err := tx.Exec("UPDATE research_tasks SET status = 'submitted', updated_at = ? WHERE id = ?", now, rtID); err != nil {
 				return fmt.Errorf("UPDATE research_task: %w", err)
 			}
 			if err := tx.QueryRow("SELECT request_id, researcher_id FROM research_tasks WHERE id = ?", rtID).Scan(&reqID, &researcherID); err != nil {
 				return fmt.Errorf("lookup request: %w", err)
 			}
-			// نعيد الطلب لحالة in_progress حتى يستطيع الباحث الإحالة للمعاون
-			if _, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?", now, reqID); err != nil {
+			// المدقق اللغوي يحيل البحث إلى المعاون مباشرةً (بلا خطوة وسيطة عند الباحث)
+			if _, err := tx.Exec("UPDATE requests SET status = 'pending_assistant', updated_at = ? WHERE id = ?", now, reqID); err != nil {
 				return fmt.Errorf("UPDATE requests: %w", err)
 			}
 
-			// إشعار الباحث ليحيله للمعاون (req.md - workflow جديد)
+			// إشعار كل المعاونين النشطين
+			assistantRows, err := tx.Query("SELECT id FROM users WHERE role = 'assistant_manager' AND status = 'active'")
+			if err != nil {
+				return fmt.Errorf("lookup assistants: %w", err)
+			}
+			var assistants []int
+			for assistantRows.Next() {
+				var aid int
+				if assistantRows.Scan(&aid) == nil {
+					assistants = append(assistants, aid)
+				}
+			}
+			assistantRows.Close()
+			for _, aid := range assistants {
+				if err := createNotificationTx(tx, aid, "بحث جاهز للتدقيق النهائي",
+					fmt.Sprintf("انتهى التدقيق اللغوي للطلب %s وأُحيل إليكم للتدقيق النهائي", reqID),
+					"info", strPtr("request"), &reqID); err != nil {
+					return err
+				}
+			}
+
+			// إشعار الباحث للعلم
 			if researcherID > 0 {
 				if err := createNotificationTx(tx, researcherID, "تم التدقيق اللغوي",
-					fmt.Sprintf("تم إتمام التدقيق اللغوي للطلب %s. يرجى إحالته إلى المعاون للتدقيق النهائي.", reqID),
+					fmt.Sprintf("انتهى التدقيق اللغوي لبحث الطلب %s وأُحيل إلى المعاون للتدقيق النهائي.", reqID),
 					"success", strPtr("request"), &reqID); err != nil {
 					return err
 				}
@@ -209,9 +229,8 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// التحقق أن الطلب لقسم رئيس القسم وأنه في حالة pending_dept_review
-	var assignedDept sql.NullString
 	var status string
-	if err := db.DB.QueryRow("SELECT assigned_department, status FROM requests WHERE id = ?", id).Scan(&assignedDept, &status); err != nil {
+	if err := db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&status); err != nil {
 		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
 		return
 	}
@@ -219,9 +238,7 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الطلب ليس بانتظار مراجعة رئيس القسم"})
 		return
 	}
-	var userDept sql.NullString
-	logErr("DeptReview user lookup", db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&userDept))
-	if !assignedDept.Valid || !userDept.Valid || assignedDept.String != userDept.String {
+	if allowed, _ := userDepartmentHandlesRequest(id, userID); !allowed {
 		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "هذا الطلب لا يخص قسمك"})
 		return
 	}

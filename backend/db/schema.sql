@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL CHECK (role IN ('deputy', 'manager', 'department_head', 'researcher', 'proofreader', 'assistant_manager', 'admin')),
     department_id TEXT REFERENCES departments(id),
     deputy_id TEXT,
+    -- نوع الجهة الطالبة: نواب، رئاسات، لجان، رؤساء الكتل، مدراء، مستشارين
+    -- كلها تحمل role='deputy' وتستخدم بوابة تقديم الطلبات نفسها
+    requester_type TEXT DEFAULT 'deputy',
     committee TEXT,
     phone TEXT,
     specialization TEXT,
@@ -83,10 +86,11 @@ CREATE TABLE IF NOT EXISTS requests (
     phone TEXT,
     email TEXT,
     -- إضافة 'pending_dept_review', 'pending_assistant', 'pending_dept_send' للـ workflow الجديد
+    -- و 'pending_manager_send' لمسار البحوث ذات الخصوصية (تُرسل للنائب عبر مدير الدائرة)
     status TEXT DEFAULT 'pending' CHECK (status IN (
         'pending', 'assigned', 'confirmed', 'in_progress', 'review',
         'pending_dept_review', 'proofreading',
-        'pending_assistant', 'pending_dept_send',
+        'pending_assistant', 'pending_dept_send', 'pending_manager_send',
         'under_manager_review',
         'delivered', 'completed', 'returned_exists', 'rejected'
     )),
@@ -94,6 +98,11 @@ CREATE TABLE IF NOT EXISTS requests (
     assigned_department TEXT REFERENCES departments(id),
     -- موافقة النائب على نشر/توزيع البحث (نقطة 3 من بوابة النواب)
     can_share INTEGER DEFAULT 0,
+    -- تصنيف السرية: يحدده الطالب عند التقديم، ويستطيع المعاون تعديله عند التدقيق النهائي
+    -- 'public' → يوجَّه عبر رئيس القسم | 'confidential' → يوجَّه عبر مدير الدائرة
+    confidentiality TEXT DEFAULT 'public' CHECK (confidentiality IN ('public', 'confidential')),
+    -- نوع الجهة الطالبة وقت التقديم (نسخة تاريخية من users.requester_type)
+    requester_type TEXT DEFAULT 'deputy',
     date_received DATETIME DEFAULT CURRENT_TIMESTAMP,
     deadline DATETIME,
     referral_date DATETIME,

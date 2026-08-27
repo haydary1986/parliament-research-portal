@@ -22,7 +22,7 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	limit := getQueryInt(r, "limit", 50)
 	offset := (page - 1) * limit
 
-	query := `SELECT id, name, email, role, department_id, deputy_id, committee,
+	query := `SELECT id, name, email, role, department_id, deputy_id, requester_type, committee,
 		phone, specialization, status, last_login, created_at
 		FROM users WHERE 1=1`
 	countQuery := "SELECT COUNT(*) FROM users WHERE 1=1"
@@ -58,7 +58,7 @@ func GetUsers(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var u models.User
 		err := rows.Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.DepartmentID,
-			&u.DeputyID, &u.Committee, &u.Phone, &u.Specialization,
+			&u.DeputyID, &u.RequesterType, &u.Committee, &u.Phone, &u.Specialization,
 			&u.Status, &u.LastLogin, &u.CreatedAt)
 		if err != nil {
 			continue
@@ -77,11 +77,11 @@ func GetUser(w http.ResponseWriter, r *http.Request) {
 
 	var u models.User
 	err := db.DB.QueryRow(`
-		SELECT id, name, email, role, department_id, deputy_id, committee,
+		SELECT id, name, email, role, department_id, deputy_id, requester_type, committee,
 		       phone, specialization, status, last_login, created_at
 		FROM users WHERE id = ?
 	`, id).Scan(&u.ID, &u.Name, &u.Email, &u.Role, &u.DepartmentID,
-		&u.DeputyID, &u.Committee, &u.Phone, &u.Specialization,
+		&u.DeputyID, &u.RequesterType, &u.Committee, &u.Phone, &u.Specialization,
 		&u.Status, &u.LastLogin, &u.CreatedAt)
 
 	if err != nil {
@@ -131,15 +131,16 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	callerID := getUserID(r)
 
 	var input struct {
-		Name         string   `json:"name"`
-		Email        string   `json:"email"`
-		Password     string   `json:"password"`
-		Role         string   `json:"role"`
-		DepartmentID *string  `json:"department_id"`
-		Committee    *string  `json:"committee"`  // للنواب (واحدة، للتوافق)
-		Committees   []string `json:"committees"` // للنواب (متعددة) - الأولى = الرئيسية
-		Phone        *string  `json:"phone"`      // للنواب (لإرسال SMS)
-		Permissions  []string `json:"permissions"`
+		Name          string   `json:"name"`
+		Email         string   `json:"email"`
+		Password      string   `json:"password"`
+		Role          string   `json:"role"`
+		DepartmentID  *string  `json:"department_id"`
+		RequesterType string   `json:"requester_type"` // للجهات الطالبة: نواب/رئاسات/لجان/رؤساء الكتل/مدراء/مستشارين
+		Committee     *string  `json:"committee"`      // للنواب (واحدة، للتوافق)
+		Committees    []string `json:"committees"`     // للنواب (متعددة) - الأولى = الرئيسية
+		Phone         *string  `json:"phone"`          // للنواب (لإرسال SMS)
+		Permissions   []string `json:"permissions"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -207,11 +208,14 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		primaryCommittee = &c
 	}
 
+	// نوع الجهة الطالبة يخص الأدوار الطالبة فقط (role='deputy')
+	requesterType := normalizeRequesterType(input.RequesterType)
+
 	result, err := db.DB.Exec(`
-		INSERT INTO users (name, email, password_hash, role, department_id, committee, phone, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+		INSERT INTO users (name, email, password_hash, role, department_id, requester_type, committee, phone, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
 	`, sanitize(input.Name), sanitize(input.Email), passwordHash, input.Role,
-		input.DepartmentID, primaryCommittee, sanitizePtr(input.Phone))
+		input.DepartmentID, requesterType, primaryCommittee, sanitizePtr(input.Phone))
 
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{
@@ -380,9 +384,10 @@ func BulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 
 		// إدخال المستخدم
 		result, err := db.DB.Exec(`
-			INSERT INTO users (name, email, password_hash, role, committee, phone, deputy_id, status)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
-		`, u.Name, u.Email, hashed, role, primaryCommittee, sanitize(u.Phone), sanitize(u.DeputyID))
+			INSERT INTO users (name, email, password_hash, role, requester_type, committee, phone, deputy_id, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+		`, u.Name, u.Email, hashed, role, normalizeRequesterType(u.RequesterType),
+			primaryCommittee, sanitize(u.Phone), sanitize(u.DeputyID))
 		if err != nil {
 			res.Error = "البريد قد يكون مكرراً: " + err.Error()
 			results = append(results, res)
@@ -409,11 +414,11 @@ func BulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 
 		// إضافة الصلاحيات الافتراضية حسب الدور
 		permsMap := map[string][]string{
-			"deputy":          {"submit_request", "view_own_requests"},
-			"researcher":      {"view_assigned", "submit_research", "request_info"},
-			"proofreader":     {"proofread", "edit_research"},
-			"department_head": {"manage_requests", "assign_researchers", "view_department", "confirm_request"},
-			"manager":         {"view_all_requests", "manage_requests", "assign_department", "view_reports"},
+			"deputy":            {"submit_request", "view_own_requests"},
+			"researcher":        {"view_assigned", "submit_research", "request_info"},
+			"proofreader":       {"proofread", "edit_research"},
+			"department_head":   {"manage_requests", "assign_researchers", "view_department", "confirm_request"},
+			"manager":           {"view_all_requests", "manage_requests", "assign_department", "view_reports"},
 			"assistant_manager": {"assistant_final_review", "view_all_requests"},
 		}
 		for _, perm := range permsMap[role] {

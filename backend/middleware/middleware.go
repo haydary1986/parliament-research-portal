@@ -345,9 +345,21 @@ func RoleAuth(roles ...string) func(http.Handler) http.Handler {
 	}
 }
 
-// BodyLimit - حد أقصى لحجم الطلب (1MB)
+// bodyLimitExempt المسارات المستثناة من حد الـ 1MB العام.
+// رفع الملفات يفرض حده الخاص (10MB) داخل الـ handler عبر MaxBytesReader،
+// فبدون هذا الاستثناء كان أي ملف أكبر من 1MB يُرفض بـ 413 رغم أن
+// الواجهة والـ handler يسمحان بـ 10MB.
+var bodyLimitExempt = map[string]bool{
+	"/api/upload": true,
+}
+
+// BodyLimit - حد أقصى لحجم الطلب (1MB) عدا مسارات رفع الملفات
 func BodyLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if bodyLimitExempt[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.ContentLength > 1<<20 { // 1MB
 			http.Error(w, `{"success":false,"message":"حجم الطلب كبير جداً"}`, http.StatusRequestEntityTooLarge)
 			return

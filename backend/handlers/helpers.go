@@ -161,3 +161,71 @@ func createNotificationTx(tx *sql.Tx, userID int, title, message, notifType stri
 func strPtr(s string) *string {
 	return &s
 }
+
+// userDepartmentHandlesRequest يتحقق أن قسم المستخدم من الأقسام المُحالة للطلب.
+// يقبل القسم الرئيسي (requests.assigned_department) أو أي قسم في
+// جدول request_departments — وهو ما يجعل الإحالة لأكثر من قسم تعمل فعلياً:
+// بدونه كان رئيس القسم الثاني يُخطَر بالطلب ثم يُرفض بـ 403.
+func userDepartmentHandlesRequest(requestID string, userID int) (bool, string) {
+	var userDept sql.NullString
+	if err := db.DB.QueryRow(
+		"SELECT department_id FROM users WHERE id = ?", userID,
+	).Scan(&userDept); err != nil || !userDept.Valid || userDept.String == "" {
+		return false, ""
+	}
+
+	var primary sql.NullString
+	if err := db.DB.QueryRow(
+		"SELECT assigned_department FROM requests WHERE id = ?", requestID,
+	).Scan(&primary); err != nil {
+		return false, userDept.String
+	}
+	if primary.Valid && primary.String == userDept.String {
+		return true, userDept.String
+	}
+
+	var n int
+	logErr("userDepartmentHandlesRequest junction", db.DB.QueryRow(
+		"SELECT COUNT(*) FROM request_departments WHERE request_id = ? AND department_id = ?",
+		requestID, userDept.String,
+	).Scan(&n))
+	return n > 0, userDept.String
+}
+
+// =============================================
+// تصنيف السرية والجهات الطالبة
+// =============================================
+
+// ConfidentialityPublic البحث عام → يُسلَّم للنائب عبر رئيس القسم
+// ConfidentialityConfidential البحث ذو خصوصية → يُسلَّم عبر مدير الدائرة
+const (
+	ConfidentialityPublic       = "public"
+	ConfidentialityConfidential = "confidential"
+)
+
+// normalizeConfidentiality يقبل القيمة المعروفة فقط ويرجع 'public' لأي شيء آخر
+func normalizeConfidentiality(v string) string {
+	if v == ConfidentialityConfidential {
+		return ConfidentialityConfidential
+	}
+	return ConfidentialityPublic
+}
+
+// RequesterTypes الجهات التي يحق لها تقديم طلب بحثي
+// كلها تحمل role='deputy' وتستخدم بوابة تقديم الطلبات نفسها
+var RequesterTypes = map[string]bool{
+	"deputy":      true, // نائب
+	"presidency":  true, // رئاسات
+	"committee":   true, // لجان
+	"bloc_leader": true, // رؤساء الكتل
+	"director":    true, // مدراء
+	"advisor":     true, // مستشارين
+}
+
+// normalizeRequesterType يرجع 'deputy' لأي قيمة غير معروفة
+func normalizeRequesterType(v string) string {
+	if RequesterTypes[v] {
+		return v
+	}
+	return "deputy"
+}

@@ -13,7 +13,8 @@ type User struct {
 	Role           string     `json:"role"`
 	DepartmentID   *string    `json:"department_id"`
 	DeputyID       *string    `json:"deputy_id"`
-	Committee      *string    `json:"committee"`     // اللجنة الرئيسية (للتوافق مع القديم)
+	RequesterType  *string    `json:"requester_type"`       // نوع الجهة الطالبة (للأدوار الطالبة)
+	Committee      *string    `json:"committee"`            // اللجنة الرئيسية (للتوافق مع القديم)
 	Committees     []string   `json:"committees,omitempty"` // قائمة كل لجان النائب
 	Phone          *string    `json:"phone"`
 	Specialization *string    `json:"specialization"`
@@ -30,12 +31,13 @@ type BulkUserInput struct {
 }
 
 type BulkUserRow struct {
-	Name       string   `json:"name"`
-	Email      string   `json:"email"`       // اختياري - يُولَّد تلقائياً من الاسم
-	Phone      string   `json:"phone"`       // اختياري
-	Role       string   `json:"role"`        // افتراضي "deputy"
-	Committees []string `json:"committees"`  // قائمة اللجان
-	DeputyID   string   `json:"deputy_id"`   // اختياري
+	Name          string   `json:"name"`
+	Email         string   `json:"email"`          // اختياري - يُولَّد تلقائياً من الاسم
+	Phone         string   `json:"phone"`          // اختياري
+	Role          string   `json:"role"`           // افتراضي "deputy"
+	RequesterType string   `json:"requester_type"` // افتراضي "deputy"
+	Committees    []string `json:"committees"`     // قائمة اللجان
+	DeputyID      string   `json:"deputy_id"`      // اختياري
 }
 
 type BulkUserResult struct {
@@ -75,7 +77,9 @@ type Request struct {
 	Status                string               `json:"status"`
 	AssignedDepartment    *string              `json:"assigned_department"`
 	AssignedDepartments   []string             `json:"assigned_departments,omitempty"` // قائمة كاملة من جدول request_departments
-	CanShare              int                  `json:"can_share"`                       // موافقة النائب على نشر البحث
+	CanShare              int                  `json:"can_share"`                      // موافقة النائب على نشر البحث
+	Confidentiality       string               `json:"confidentiality"`                // 'public' | 'confidential'
+	RequesterType         *string              `json:"requester_type"`                 // نوع الجهة الطالبة
 	DateReceived          time.Time            `json:"date_received"`
 	Deadline              *time.Time           `json:"deadline"`
 	ReferralDate          *time.Time           `json:"referral_date"`
@@ -92,6 +96,8 @@ type Request struct {
 	UpdatedAt             time.Time            `json:"updated_at"`
 	Confirmation          *RequestConfirmation `json:"confirmation,omitempty"`
 	Notes                 []Note               `json:"notes,omitempty"`
+	// عدد كتب المخاطبات الرسمية — يُستخدم لإظهار مرحلة «إجراء مخاطبات رسمية» للطالب
+	OfficialLettersCount int `json:"official_letters_count"`
 }
 
 // =============================================
@@ -217,17 +223,35 @@ type LoginResponse struct {
 }
 
 type CreateRequestInput struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Purpose     string `json:"purpose"`
-	Committee   string `json:"committee"`
-	CanShare    bool   `json:"can_share"` // موافقة النائب على نشر البحث
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	Purpose         string `json:"purpose"`
+	Committee       string `json:"committee"`
+	CanShare        bool   `json:"can_share"`       // موافقة النائب على نشر البحث
+	Confidentiality string `json:"confidentiality"` // 'public' | 'confidential' — يحدده الطالب
+}
+
+// UpdateRequestInput تعديل بيانات الطلب من مدير الدائرة
+type UpdateRequestInput struct {
+	Title           string  `json:"title"`
+	Description     string  `json:"description"`
+	Purpose         string  `json:"purpose"`
+	Committee       string  `json:"committee"`
+	Deadline        *string `json:"deadline"` // ISO-8601 أو فارغ
+	CanShare        *bool   `json:"can_share"`
+	Confidentiality string  `json:"confidentiality"`
 }
 
 // AssignRequestInput يقبل قسماً واحداً أو قائمة (نقطة 1 من بوابة المدير)
+// ويسمح لمدير الدائرة بتعيين الباحث/الباحثين مباشرة مع تفاصيل الإعداد
 type AssignRequestInput struct {
 	DepartmentID  string   `json:"department_id"`  // متوافق مع القديم
 	DepartmentIDs []string `json:"department_ids"` // الإحالة لأكثر من قسم
+	// تعيين مباشر من مدير الدائرة (اختياري — إن تُرك فارغاً يتولاه رئيس القسم)
+	ResearcherIDs  []int  `json:"researcher_ids"`
+	ServiceType    string `json:"service_type"`
+	Classification string `json:"classification"`
+	CompletionDays int    `json:"completion_days"`
 }
 
 // ConfirmRequestInput يقبل باحثاً واحداً أو قائمة (نقطة 1 من بوابة القسم)
@@ -235,13 +259,17 @@ type ConfirmRequestInput struct {
 	ServiceType    string `json:"service_type"`
 	Classification string `json:"classification"`
 	CompletionDays int    `json:"completion_days"`
-	ResearcherID   int    `json:"researcher_id"`   // متوافق مع القديم
-	ResearcherIDs  []int  `json:"researcher_ids"`  // تعيين باحثين متعددين
+	ResearcherID   int    `json:"researcher_id"`  // متوافق مع القديم
+	ResearcherIDs  []int  `json:"researcher_ids"` // تعيين باحثين متعددين
 }
 
+// CreateInfoRequestInput تفاصيل كتاب المخاطبة الرسمي
+// رقم الكتاب وتاريخه اختياريان — يُولَّد رقم تلقائي ويُستخدم تاريخ اليوم عند غيابهما
 type CreateInfoRequestInput struct {
-	TargetEntity string `json:"target_entity"`
-	Subject      string `json:"subject"`
+	TargetEntity string `json:"target_entity"` // جهة المخاطبة
+	Subject      string `json:"subject"`       // موضوع الكتاب
+	Number       string `json:"number"`        // رقم الكتاب الصادر
+	LetterDate   string `json:"letter_date"`   // تاريخ الكتاب (YYYY-MM-DD)
 }
 
 type APIResponse struct {

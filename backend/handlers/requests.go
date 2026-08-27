@@ -24,7 +24,9 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 
 	query := `SELECT r.id, r.title, r.description, r.deputy_id, r.deputy_name,
 		r.committee, r.purpose, r.phone, r.email, r.status,
-		r.assigned_department, r.can_share, r.date_received, r.deadline,
+		r.assigned_department, r.can_share,
+		COALESCE(r.confidentiality, 'public'), r.requester_type,
+		r.date_received, r.deadline,
 		r.referral_date, r.completed_date, r.existing_research_id,
 		r.delivered_to_deputy_date, r.archived, r.archived_date,
 		r.final_review_by, r.final_review_date,
@@ -83,7 +85,9 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 		err := rows.Scan(
 			&req.ID, &req.Title, &req.Description, &req.DeputyID, &req.DeputyName,
 			&req.Committee, &req.Purpose, &req.Phone, &req.Email, &req.Status,
-			&req.AssignedDepartment, &req.CanShare, &req.DateReceived, &req.Deadline,
+			&req.AssignedDepartment, &req.CanShare,
+			&req.Confidentiality, &req.RequesterType,
+			&req.DateReceived, &req.Deadline,
 			&req.ReferralDate, &req.CompletedDate,
 			&req.ExistingResearchID, &req.DeliveredToDeputyDate,
 			&req.Archived, &req.ArchivedDate, &req.FinalReviewBy, &req.FinalReviewDate,
@@ -91,6 +95,7 @@ func GetRequests(w http.ResponseWriter, r *http.Request) {
 			&req.CreatedAt, &req.UpdatedAt,
 		)
 		if err != nil {
+			log.Printf("GetRequests scan: %v", err)
 			continue
 		}
 		idIndex[req.ID] = len(requests)
@@ -136,7 +141,9 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 	var req models.Request
 	err := db.DB.QueryRow(`
 		SELECT id, title, description, deputy_id, deputy_name, committee, purpose,
-		       phone, email, status, assigned_department, can_share, date_received, deadline,
+		       phone, email, status, assigned_department, can_share,
+		       COALESCE(confidentiality, 'public'), requester_type,
+		       date_received, deadline,
 		       referral_date, completed_date, existing_research_id, delivered_to_deputy_date,
 		       archived, archived_date, final_review_by, final_review_date,
 		       assistant_review_by, assistant_review_date,
@@ -145,7 +152,9 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 	`, id).Scan(
 		&req.ID, &req.Title, &req.Description, &req.DeputyID, &req.DeputyName,
 		&req.Committee, &req.Purpose, &req.Phone, &req.Email, &req.Status,
-		&req.AssignedDepartment, &req.CanShare, &req.DateReceived, &req.Deadline,
+		&req.AssignedDepartment, &req.CanShare,
+		&req.Confidentiality, &req.RequesterType,
+		&req.DateReceived, &req.Deadline,
 		&req.ReferralDate, &req.CompletedDate,
 		&req.ExistingResearchID, &req.DeliveredToDeputyDate,
 		&req.Archived, &req.ArchivedDate, &req.FinalReviewBy, &req.FinalReviewDate,
@@ -196,6 +205,13 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 		req.Confirmation = &conf
 	}
 
+	// عدد كتب المخاطبات الرسمية لكل مهام هذا الطلب
+	logErr("GetRequest letters count", db.DB.QueryRow(`
+		SELECT COUNT(*) FROM information_requests ir
+		JOIN research_tasks rt ON rt.id = ir.research_task_id
+		WHERE rt.request_id = ?
+	`, id).Scan(&req.OfficialLettersCount))
+
 	// جلب الأقسام المُحالة (multi-department)
 	deptRows, _ := db.DB.Query("SELECT department_id FROM request_departments WHERE request_id = ?", id)
 	if deptRows != nil {
@@ -242,14 +258,14 @@ func CreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// جلب بيانات النائب
+	// جلب بيانات الجهة الطالبة
 	var user models.User
 	logErr("CreateRequest user lookup",
-		db.DB.QueryRow("SELECT name, committee, phone, email FROM users WHERE id = ?", userID).Scan(
-			&user.Name, &user.Committee, &user.Phone, &user.Email,
+		db.DB.QueryRow("SELECT name, committee, phone, email, requester_type FROM users WHERE id = ?", userID).Scan(
+			&user.Name, &user.Committee, &user.Phone, &user.Email, &user.RequesterType,
 		))
 
-	// اختيار اللجنة: من الإدخال إذا قدّمها النائب، وإلا من سجل المستخدم
+	// اختيار اللجنة: من الإدخال إذا قدّمها الطالب، وإلا من سجل المستخدم
 	committee := sanitize(input.Committee)
 	if committee == "" && user.Committee != nil {
 		committee = *user.Committee
@@ -260,13 +276,22 @@ func CreateRequest(w http.ResponseWriter, r *http.Request) {
 		canShare = 1
 	}
 
+	// تصنيف السرية يحدده الطالب — الافتراضي 'public'
+	confidentiality := normalizeConfidentiality(input.Confidentiality)
+
+	// نوع الجهة الطالبة يُنسخ من حساب المستخدم لحفظه تاريخياً على الطلب
+	requesterType := "deputy"
+	if user.RequesterType != nil && *user.RequesterType != "" {
+		requesterType = *user.RequesterType
+	}
+
 	reqID := generateID("REQ")
 
 	_, err := db.DB.Exec(`
-		INSERT INTO requests (id, title, description, deputy_id, deputy_name, committee, purpose, phone, email, status, can_share, date_received)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+		INSERT INTO requests (id, title, description, deputy_id, deputy_name, committee, purpose, phone, email, status, can_share, confidentiality, requester_type, date_received)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
 	`, reqID, sanitize(input.Title), sanitize(input.Description), userID, user.Name, committee, sanitize(input.Purpose),
-		user.Phone, user.Email, canShare, time.Now())
+		user.Phone, user.Email, canShare, confidentiality, requesterType, time.Now())
 
 	if err != nil {
 		log.Printf("CreateRequest INSERT failed: %v", err)
@@ -366,8 +391,154 @@ func ReturnRequest(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PUT /api/requests/{id} - تعديل بيانات الطلب (مدير الدائرة)
+// يسمح بتصحيح العنوان والوصف والغرض واللجنة والموعد والسرية بعد التقديم.
+// لا يُسمح بالتعديل بعد تسليم البحث للنائب.
+func UpdateRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	var input models.UpdateRequestInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
+		return
+	}
+
+	// الحالة الحالية + القيم الحالية (لملء ما لم يُرسَل)
+	var current models.Request
+	var currentConf string
+	err := db.DB.QueryRow(`
+		SELECT status, title, description, purpose, committee, can_share,
+		       COALESCE(confidentiality, 'public')
+		FROM requests WHERE id = ?
+	`, id).Scan(&current.Status, &current.Title, &current.Description,
+		&current.Purpose, &current.Committee, &current.CanShare, &currentConf)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
+		return
+	}
+
+	locked := map[string]bool{"delivered": true, "completed": true, "returned_exists": true, "rejected": true}
+	if locked[current.Status] {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "لا يمكن تعديل طلب مُسلَّم أو منتهٍ",
+		})
+		return
+	}
+
+	// دمج المدخلات مع القيم الحالية
+	title := sanitize(input.Title)
+	if title == "" {
+		title = current.Title
+	}
+	if len(title) < 5 {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "عنوان الطلب قصير جداً"})
+		return
+	}
+
+	description := sanitize(input.Description)
+	if description == "" && current.Description != nil {
+		description = *current.Description
+	}
+
+	purpose := sanitize(input.Purpose)
+	if purpose == "" && current.Purpose != nil {
+		purpose = *current.Purpose
+	}
+	validPurposes := map[string]bool{"oversight": true, "legislative": true, "other": true}
+	if purpose != "" && !validPurposes[purpose] {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الغرض غير صالح"})
+		return
+	}
+
+	committee := sanitize(input.Committee)
+	if committee == "" && current.Committee != nil {
+		committee = *current.Committee
+	}
+
+	canShare := current.CanShare
+	if input.CanShare != nil {
+		canShare = 0
+		if *input.CanShare {
+			canShare = 1
+		}
+	}
+
+	confidentiality := currentConf
+	if input.Confidentiality != "" {
+		confidentiality = normalizeConfidentiality(input.Confidentiality)
+	}
+
+	// الموعد النهائي: نص فارغ يمسحه، والقيمة الصالحة تحدّثه
+	var deadline *time.Time
+	clearDeadline := false
+	if input.Deadline != nil {
+		if *input.Deadline == "" {
+			clearDeadline = true
+		} else {
+			parsed, perr := parseFlexibleDate(*input.Deadline)
+			if perr != nil {
+				writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "صيغة الموعد النهائي غير صالحة"})
+				return
+			}
+			deadline = &parsed
+		}
+	}
+
+	var userName string
+	logErr("UpdateRequest userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+
+	txErr := withTx(func(tx *sql.Tx) error {
+		now := time.Now()
+		if _, err := tx.Exec(`
+			UPDATE requests SET title = ?, description = ?, purpose = ?, committee = ?,
+			       can_share = ?, confidentiality = ?, updated_at = ?
+			WHERE id = ?
+		`, title, description, purpose, committee, canShare, confidentiality, now, id); err != nil {
+			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+
+		if clearDeadline {
+			if _, err := tx.Exec("UPDATE requests SET deadline = NULL WHERE id = ?", id); err != nil {
+				return fmt.Errorf("clear deadline: %w", err)
+			}
+		} else if deadline != nil {
+			if _, err := tx.Exec("UPDATE requests SET deadline = ? WHERE id = ?", *deadline, id); err != nil {
+				return fmt.Errorf("UPDATE deadline: %w", err)
+			}
+		}
+
+		if _, err := tx.Exec(
+			`INSERT INTO notes (entity_type, entity_id, user_id, user_name, content) VALUES ('request', ?, ?, ?, ?)`,
+			id, userID, userName, "عدّل مدير الدائرة بيانات الطلب",
+		); err != nil {
+			return fmt.Errorf("INSERT note: %w", err)
+		}
+
+		return logActivityTx(tx, userID, userName, "update_request", strPtr("request"), &id, "تعديل بيانات الطلب")
+	})
+
+	if txErr != nil {
+		log.Printf("UpdateRequest tx failed: %v", txErr)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تعديل الطلب"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم تعديل الطلب بنجاح"})
+}
+
+// parseFlexibleDate يقبل YYYY-MM-DD أو RFC3339 الكامل
+func parseFlexibleDate(v string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", v); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, v)
+}
+
 // PUT /api/requests/{id}/assign
 // يدعم الإحالة لقسم واحد (legacy) أو قائمة أقسام (نقطة 1 من بوابة المدير)
+// ويسمح لمدير الدائرة بتعيين الباحث/الباحثين مباشرة مع تفاصيل الإعداد.
+// إن تُركت قائمة الباحثين فارغة، يبقى الطلب 'assigned' ويتولى رئيس القسم التعيين.
 func AssignRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := getUserID(r)
@@ -400,6 +571,39 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// توحيد قائمة الباحثين (اختيارية)
+	researchers := dedupeInts(input.ResearcherIDs)
+
+	// عند التعيين المباشر: تفاصيل الإعداد مطلوبة والباحثون يجب أن يكونوا ضمن الأقسام المُحالة
+	if len(researchers) > 0 {
+		if input.ServiceType == "" || input.Classification == "" {
+			writeJSON(w, http.StatusBadRequest, models.APIResponse{
+				Success: false, Message: "عند تعيين باحث يجب تحديد نوع الخدمة والتصنيف",
+			})
+			return
+		}
+		if input.CompletionDays < 1 || input.CompletionDays > 365 {
+			writeJSON(w, http.StatusBadRequest, models.APIResponse{
+				Success: false, Message: "مدة الإنجاز يجب أن تكون بين 1 و 365 يوماً",
+			})
+			return
+		}
+		if msg := validateResearchersInDepartments(researchers, deptIDs); msg != "" {
+			writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
+			return
+		}
+		// لا نسمح بالتعيين المباشر إن كانت هناك مهام بحث قائمة (تفادياً لازدواج العمل)
+		var existingTasks int
+		logErr("AssignRequest task count",
+			db.DB.QueryRow("SELECT COUNT(*) FROM research_tasks WHERE request_id = ?", id).Scan(&existingTasks))
+		if existingTasks > 0 {
+			writeJSON(w, http.StatusBadRequest, models.APIResponse{
+				Success: false, Message: "الطلب له مهام بحث قائمة — استخدم إعادة إسناد المهمة بدل التعيين المباشر",
+			})
+			return
+		}
+	}
+
 	var userName string
 	logErr("AssignRequest user lookup", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
 
@@ -408,14 +612,32 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 
 	primaryDept := deptIDs[0]
 
+	// الحالة الجديدة: in_progress عند التعيين المباشر، وإلا assigned
+	newStatus := "assigned"
+	if len(researchers) > 0 {
+		newStatus = "in_progress"
+	}
+
+	var deadline *time.Time
+	if input.CompletionDays > 0 {
+		d := time.Now().AddDate(0, 0, input.CompletionDays)
+		deadline = &d
+	}
+
+	type assignedTask struct {
+		taskID       string
+		researcherID int
+	}
+	var createdTasks []assignedTask
+
 	txErr := withTx(func(tx *sql.Tx) error {
 		now := time.Now()
 		// التحديث الرئيسي للطلب: نخزن أول قسم كـ "primary" + الحالة
 		result, err := tx.Exec(`
-			UPDATE requests SET assigned_department = ?, status = 'assigned',
+			UPDATE requests SET assigned_department = ?, status = ?,
 			       referral_date = ?, updated_at = ?
 			WHERE id = ? AND status IN ('pending', 'assigned')
-		`, primaryDept, now, now, id)
+		`, primaryDept, newStatus, now, now, id)
 		if err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
 		}
@@ -438,9 +660,32 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// التعيين المباشر: تأكيد الطلب + مهمة بحث لكل باحث
+		if len(researchers) > 0 {
+			if _, err := tx.Exec(`
+				INSERT OR REPLACE INTO request_confirmations (request_id, service_type, classification, completion_days, confirmed_by)
+				VALUES (?, ?, ?, ?, ?)
+			`, id, input.ServiceType, input.Classification, input.CompletionDays, userID); err != nil {
+				return fmt.Errorf("INSERT confirmation: %w", err)
+			}
+			for _, rid := range researchers {
+				taskID := generateID("RT")
+				if _, err := tx.Exec(`
+					INSERT INTO research_tasks (id, request_id, researcher_id, status, deadline, completion_days)
+					VALUES (?, ?, ?, 'assigned', ?, ?)
+				`, taskID, id, rid, deadline, input.CompletionDays); err != nil {
+					return fmt.Errorf("INSERT research_task: %w", err)
+				}
+				createdTasks = append(createdTasks, assignedTask{taskID, rid})
+			}
+		}
+
 		details := fmt.Sprintf("إحالة الطلب إلى قسم %s", primaryDept)
 		if len(deptIDs) > 1 {
 			details = fmt.Sprintf("إحالة الطلب إلى %d أقسام", len(deptIDs))
+		}
+		if len(researchers) > 0 {
+			details += fmt.Sprintf(" وتعيين %d باحث مباشرةً من مدير الدائرة", len(researchers))
 		}
 		if err := logActivityTx(tx, userID, userName, "assign_request", strPtr("request"), &id, details); err != nil {
 			return err
@@ -464,10 +709,23 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 
+		headMsg := fmt.Sprintf("تمت إحالة الطلب %s إلى قسمكم", id)
+		if len(researchers) > 0 {
+			headMsg = fmt.Sprintf("تمت إحالة الطلب %s إلى قسمكم مع تعيين الباحث/الباحثين من مدير الدائرة", id)
+		}
 		for _, h := range notifyHeads {
 			if err := createNotificationTx(tx, h, "طلب بحثي جديد",
-				fmt.Sprintf("تمت إحالة الطلب %s إلى قسمكم", id),
-				"info", strPtr("request"), &id); err != nil {
+				headMsg, "info", strPtr("request"), &id); err != nil {
+				return err
+			}
+		}
+
+		// إشعار الباحثين المعينين مباشرةً
+		for _, t := range createdTasks {
+			tID := t.taskID
+			if err := createNotificationTx(tx, t.researcherID, "مهمة بحثية جديدة",
+				fmt.Sprintf("تم تعيينك للعمل على الطلب %s", id),
+				"info", strPtr("research_task"), &tID); err != nil {
 				return err
 			}
 		}
@@ -488,9 +746,53 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, models.APIResponse{
-		Success: true, Message: "تمت إحالة الطلب بنجاح",
-	})
+	msg := "تمت إحالة الطلب بنجاح"
+	if len(researchers) > 0 {
+		msg = fmt.Sprintf("تمت الإحالة وتعيين %d باحث", len(researchers))
+	}
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: msg})
+}
+
+// dedupeInts يزيل التكرار والقيم غير الموجبة مع الحفاظ على الترتيب
+func dedupeInts(in []int) []int {
+	seen := map[int]bool{}
+	out := []int{}
+	for _, v := range in {
+		if v > 0 && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// validateResearchersInDepartments يتحقق أن كل باحث نشط وينتمي لأحد الأقسام المُحالة.
+// يرجع رسالة خطأ عربية عند الفشل، أو "" عند النجاح.
+func validateResearchersInDepartments(researcherIDs []int, deptIDs []string) string {
+	for _, rid := range researcherIDs {
+		var role, status string
+		var dept sql.NullString
+		err := db.DB.QueryRow(
+			"SELECT role, status, department_id FROM users WHERE id = ?", rid,
+		).Scan(&role, &status, &dept)
+		if err != nil {
+			return fmt.Sprintf("الباحث رقم %d غير موجود", rid)
+		}
+		if role != "researcher" || status != "active" {
+			return fmt.Sprintf("المستخدم رقم %d ليس باحثاً نشطاً", rid)
+		}
+		inDept := false
+		for _, d := range deptIDs {
+			if dept.Valid && dept.String == d {
+				inDept = true
+				break
+			}
+		}
+		if !inDept {
+			return fmt.Sprintf("الباحث رقم %d لا ينتمي إلى الأقسام المُحالة", rid)
+		}
+	}
+	return ""
 }
 
 // مساعد: ينشئ "?,?,?" للـ IN clause
@@ -519,14 +821,13 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := getUserID(r)
 
-	// التحقق أن الطلب محال لقسم رئيس القسم
-	var reqDept, userDept sql.NullString
-	if err := db.DB.QueryRow("SELECT assigned_department FROM requests WHERE id = ?", id).Scan(&reqDept); err != nil {
+	// التحقق أن الطلب محال لقسم رئيس القسم (رئيسي أو ضمن الإحالة متعددة الأقسام)
+	var exists int
+	if err := db.DB.QueryRow("SELECT COUNT(*) FROM requests WHERE id = ?", id).Scan(&exists); err != nil || exists == 0 {
 		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
 		return
 	}
-	logErr("ConfirmRequest user lookup", db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&userDept))
-	if !reqDept.Valid || !userDept.Valid || reqDept.String != userDept.String {
+	if allowed, _ := userDepartmentHandlesRequest(id, userID); !allowed {
 		writeJSON(w, http.StatusForbidden, models.APIResponse{
 			Success: false, Message: "هذا الطلب غير محال لقسمك",
 		})

@@ -12,12 +12,21 @@ import (
 func GetDashboardStats(w http.ResponseWriter, r *http.Request) {
 	var stats models.DashboardStats
 
-	db.DB.QueryRow("SELECT COUNT(*) FROM requests").Scan(&stats.TotalRequests)
-	db.DB.QueryRow("SELECT COUNT(*) FROM requests WHERE status = 'pending'").Scan(&stats.PendingRequests)
-	db.DB.QueryRow("SELECT COUNT(*) FROM requests WHERE status IN ('assigned', 'confirmed', 'in_progress', 'review', 'proofreading')").Scan(&stats.InProgressCount)
-	db.DB.QueryRow("SELECT COUNT(*) FROM requests WHERE status = 'completed'").Scan(&stats.CompletedRequests)
-	db.DB.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'researcher'").Scan(&stats.TotalResearchers)
-	db.DB.QueryRow("SELECT COUNT(*) FROM departments").Scan(&stats.TotalDepartments)
+	logErr("stats total", db.DB.QueryRow("SELECT COUNT(*) FROM requests").Scan(&stats.TotalRequests))
+	logErr("stats pending", db.DB.QueryRow("SELECT COUNT(*) FROM requests WHERE status = 'pending'").Scan(&stats.PendingRequests))
+	// قيد الإعداد: كل الحالات بين الإحالة والتسليم — تشمل مراحل الـ workflow الجديد
+	logErr("stats in_progress", db.DB.QueryRow(`
+		SELECT COUNT(*) FROM requests WHERE status IN (
+			'assigned', 'confirmed', 'in_progress', 'review',
+			'pending_dept_review', 'proofreading',
+			'pending_assistant', 'pending_dept_send', 'pending_manager_send',
+			'under_manager_review'
+		)`).Scan(&stats.InProgressCount))
+	// مكتمل: يشمل المُسلَّم للنائب (delivered) قبل قرار الأرشفة
+	logErr("stats completed", db.DB.QueryRow(
+		"SELECT COUNT(*) FROM requests WHERE status IN ('delivered', 'completed')").Scan(&stats.CompletedRequests))
+	logErr("stats researchers", db.DB.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'researcher'").Scan(&stats.TotalResearchers))
+	logErr("stats departments", db.DB.QueryRow("SELECT COUNT(*) FROM departments").Scan(&stats.TotalDepartments))
 
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: stats})
 }

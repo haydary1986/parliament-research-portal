@@ -35,11 +35,11 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	var deptID *string
 	err := db.DB.QueryRow(`
 		SELECT id, name, email, password_hash, role, department_id, deputy_id,
-		       committee, phone, specialization, status
+		       requester_type, committee, phone, specialization, status
 		FROM users WHERE email = ? AND status = 'active'
 	`, input.Email).Scan(
 		&user.ID, &user.Name, &user.Email, &passwordHash, &user.Role,
-		&deptID, &user.DeputyID, &user.Committee, &user.Phone,
+		&deptID, &user.DeputyID, &user.RequesterType, &user.Committee, &user.Phone,
 		&user.Specialization, &user.Status,
 	)
 

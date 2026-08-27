@@ -287,9 +287,21 @@ func CreateInfoRequest(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("id")
 	userID := getUserID(r)
 
+	// تحقق الملكية: الباحث يضيف مخاطبات لمهامه فقط
+	var assignedResearcher int
+	if err := db.DB.QueryRow("SELECT researcher_id FROM research_tasks WHERE id = ?", taskID).Scan(&assignedResearcher); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المهمة غير موجودة"})
+		return
+	}
+	if assignedResearcher != userID {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بتعديل هذه المهمة"})
+		return
+	}
+
 	// التحقق من الحد الأقصى (3 طلبات)
 	var count int
-	db.DB.QueryRow("SELECT COUNT(*) FROM information_requests WHERE research_task_id = ?", taskID).Scan(&count)
+	logErr("CreateInfoRequest count",
+		db.DB.QueryRow("SELECT COUNT(*) FROM information_requests WHERE research_task_id = ?", taskID).Scan(&count))
 	if count >= 3 {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{
 			Success: false, Message: "تم الوصول للحد الأقصى (3 طلبات معلومات)",
@@ -305,17 +317,35 @@ func CreateInfoRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if input.TargetEntity == "" || input.Subject == "" {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "يرجى تحديد الجهة والموضوع"})
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "يرجى تحديد جهة المخاطبة والموضوع"})
 		return
 	}
 
-	number := generateID("INF")
+	// رقم الكتاب: من إدخال الباحث إن وُجد، وإلا رقم مولَّد
+	number := sanitize(input.Number)
+	if number == "" {
+		number = generateID("INF")
+	}
+
+	// تاريخ الكتاب: من إدخال الباحث إن وُجد، وإلا تاريخ اليوم
+	letterDate := time.Now()
+	if input.LetterDate != "" {
+		parsed, perr := parseFlexibleDate(input.LetterDate)
+		if perr != nil {
+			writeJSON(w, http.StatusBadRequest, models.APIResponse{
+				Success: false, Message: "صيغة تاريخ الكتاب غير صالحة",
+			})
+			return
+		}
+		letterDate = parsed
+	}
+
 	attempt := count + 1
 
 	_, err := db.DB.Exec(`
 		INSERT INTO information_requests (research_task_id, number, target_entity, subject, status, date_sent, attempt_number)
 		VALUES (?, ?, ?, ?, 'sent', ?, ?)
-	`, taskID, number, sanitize(input.TargetEntity), sanitize(input.Subject), time.Now(), attempt)
+	`, taskID, number, sanitize(input.TargetEntity), sanitize(input.Subject), letterDate, attempt)
 
 	if err != nil {
 		log.Printf("CreateInfoRequest INSERT failed: %v", err)
@@ -328,10 +358,10 @@ func CreateInfoRequest(w http.ResponseWriter, r *http.Request) {
 	var userName string
 	logErr("CreateInfoRequest userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
 	logActivity(userID, userName, "create_info_request", strPtr("research_task"), &taskID,
-		fmt.Sprintf("إنشاء طلب معلومات (محاولة %d/3) إلى %s", attempt, input.TargetEntity))
+		fmt.Sprintf("كتاب رقم %s (محاولة %d/3) إلى %s", number, attempt, sanitize(input.TargetEntity)))
 
 	writeJSON(w, http.StatusCreated, models.APIResponse{
-		Success: true, Message: fmt.Sprintf("تم إنشاء طلب المعلومات (المحاولة %d من 3)", attempt),
+		Success: true, Message: fmt.Sprintf("تم تسجيل الكتاب (المحاولة %d من 3)", attempt),
 		Data: map[string]interface{}{"attempt_number": attempt, "number": number},
 	})
 }
@@ -441,6 +471,137 @@ func AttachResearchFile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم رفع الملف بنجاح"})
 }
 
+// PUT /api/research-tasks/{id}/reassign - إعادة إسناد المهمة لباحث بديل
+// (رئيس القسم أو مدير الدائرة) — عند تغيّر الباحث في الدائرة.
+// المهمة تُنقل بمحتواها كاملاً: الملف وطلبات المعلومات والملاحظات،
+// فيكمل الباحث الجديد من حيث توقف السابق.
+func ReassignResearchTask(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+	role := getUserRole(r)
+
+	var input struct {
+		ResearcherID int    `json:"researcher_id"`
+		Notes        string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
+		return
+	}
+	if input.ResearcherID <= 0 {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "يرجى اختيار الباحث البديل"})
+		return
+	}
+
+	// المهمة الحالية
+	var currentResearcher int
+	var taskStatus, requestID string
+	if err := db.DB.QueryRow(
+		"SELECT researcher_id, status, request_id FROM research_tasks WHERE id = ?", id,
+	).Scan(&currentResearcher, &taskStatus, &requestID); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المهمة غير موجودة"})
+		return
+	}
+	if taskStatus == "completed" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "لا يمكن إعادة إسناد مهمة مكتملة"})
+		return
+	}
+	if currentResearcher == input.ResearcherID {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الباحث البديل هو نفسه الباحث الحالي"})
+		return
+	}
+
+	// الباحث البديل: موجود ونشط وباحث فعلاً
+	var newRole, newStatus string
+	var newDept sql.NullString
+	var newName string
+	if err := db.DB.QueryRow(
+		"SELECT name, role, status, department_id FROM users WHERE id = ?", input.ResearcherID,
+	).Scan(&newName, &newRole, &newStatus, &newDept); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الباحث البديل غير موجود"})
+		return
+	}
+	if newRole != "researcher" || newStatus != "active" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "المستخدم المختار ليس باحثاً نشطاً"})
+		return
+	}
+
+	// رئيس القسم مقيَّد بقسمه؛ مدير الدائرة غير مقيد
+	if role == "department_head" {
+		var userDept sql.NullString
+		logErr("Reassign dept lookup",
+			db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&userDept))
+		if !userDept.Valid || !newDept.Valid || userDept.String != newDept.String {
+			writeJSON(w, http.StatusForbidden, models.APIResponse{
+				Success: false, Message: "يمكنك إعادة الإسناد لباحثي قسمك فقط",
+			})
+			return
+		}
+		var oldDept sql.NullString
+		logErr("Reassign old researcher dept",
+			db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", currentResearcher).Scan(&oldDept))
+		if !oldDept.Valid || oldDept.String != userDept.String {
+			writeJSON(w, http.StatusForbidden, models.APIResponse{
+				Success: false, Message: "هذه المهمة لا تخص قسمك",
+			})
+			return
+		}
+	}
+
+	var oldName, userName string
+	logErr("Reassign old name", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", currentResearcher).Scan(&oldName))
+	logErr("Reassign userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+
+	note := sanitize(input.Notes)
+	handoverNote := fmt.Sprintf("نقل المهمة %s من الباحث %s إلى الباحث %s", id, oldName, newName)
+	if note != "" {
+		handoverNote += " — " + note
+	}
+
+	txErr := withTx(func(tx *sql.Tx) error {
+		now := time.Now()
+		if _, err := tx.Exec(
+			"UPDATE research_tasks SET researcher_id = ?, updated_at = ? WHERE id = ?",
+			input.ResearcherID, now, id,
+		); err != nil {
+			return fmt.Errorf("UPDATE research_task: %w", err)
+		}
+
+		// أثر التسليم يبقى في ملاحظات المهمة
+		if _, err := tx.Exec(
+			`INSERT INTO notes (entity_type, entity_id, user_id, user_name, content) VALUES ('research_task', ?, ?, ?, ?)`,
+			id, userID, userName, handoverNote,
+		); err != nil {
+			return fmt.Errorf("INSERT note: %w", err)
+		}
+
+		if err := createNotificationTx(tx, input.ResearcherID, "أُسندت إليك مهمة بحثية",
+			fmt.Sprintf("نُقلت إليك مهمة البحث %s للطلب %s بمحتواها الحالي", id, requestID),
+			"info", strPtr("research_task"), &id); err != nil {
+			return err
+		}
+		if currentResearcher > 0 {
+			if err := createNotificationTx(tx, currentResearcher, "نُقلت المهمة إلى باحث آخر",
+				fmt.Sprintf("لم تعد مسؤولاً عن مهمة البحث %s للطلب %s", id, requestID),
+				"warning", strPtr("research_task"), &id); err != nil {
+				return err
+			}
+		}
+
+		return logActivityTx(tx, userID, userName, "reassign_research_task", strPtr("research_task"), &id, handoverNote)
+	})
+
+	if txErr != nil {
+		log.Printf("ReassignResearchTask tx failed: %v", txErr)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل إعادة إسناد المهمة"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.APIResponse{
+		Success: true, Message: fmt.Sprintf("تم نقل المهمة إلى %s", newName),
+	})
+}
+
 // PUT /api/research-tasks/{id}/refer-assistant - الباحث يحيل للمعاون للتدقيق النهائي
 // (نقطة 4 من بوابة الباحث في req.md)
 func ReferToAssistant(w http.ResponseWriter, r *http.Request) {
@@ -520,6 +681,8 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Decision string `json:"decision"` // "approve" | "reject"
 		Notes    string `json:"notes"`
+		// المعاون يستطيع تصحيح تصنيف السرية قبل التوجيه
+		Confidentiality string `json:"confidentiality"` // "public" | "confidential" (اختياري)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
@@ -530,14 +693,22 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var currentStatus string
-	if err := db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&currentStatus); err != nil {
+	var currentStatus, currentConfidentiality string
+	if err := db.DB.QueryRow(
+		"SELECT status, COALESCE(confidentiality, 'public') FROM requests WHERE id = ?", id,
+	).Scan(&currentStatus, &currentConfidentiality); err != nil {
 		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
 		return
 	}
 	if currentStatus != "pending_assistant" {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الطلب ليس بانتظار المعاون"})
 		return
+	}
+
+	// التصنيف المعتمد للتوجيه: ما أرسله المعاون إن وُجد، وإلا ما حدده الطالب
+	confidentiality := currentConfidentiality
+	if input.Confidentiality != "" {
+		confidentiality = normalizeConfidentiality(input.Confidentiality)
 	}
 
 	var userName string
@@ -548,43 +719,74 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 
 		if input.Decision == "approve" {
-			// اعتماد المعاون → يرجع لرئيس القسم لإرساله للنائب
+			// التوجيه حسب السرية:
+			//   عام  → رئيس القسم يرسله للنائب
+			//   حساس → مدير الدائرة يرسله للنائب
+			nextStatus := "pending_dept_send"
+			if confidentiality == ConfidentialityConfidential {
+				nextStatus = "pending_manager_send"
+			}
+
 			if _, err := tx.Exec(`
-				UPDATE requests SET status = 'pending_dept_send',
+				UPDATE requests SET status = ?, confidentiality = ?,
 				       assistant_review_by = ?, assistant_review_date = ?, updated_at = ?
 				WHERE id = ?
-			`, userID, now, now, id); err != nil {
+			`, nextStatus, confidentiality, userID, now, now, id); err != nil {
 				return fmt.Errorf("UPDATE requests: %w", err)
 			}
 
-			// إشعار رئيس القسم المسؤول
-			var deptID sql.NullString
-			if err := tx.QueryRow("SELECT assigned_department FROM requests WHERE id = ?", id).Scan(&deptID); err != nil {
-				return fmt.Errorf("lookup department: %w", err)
-			}
-			if deptID.Valid {
-				headRows, _ := tx.Query(
-					"SELECT id FROM users WHERE department_id = ? AND role = 'department_head' AND status = 'active'",
-					deptID.String)
-				if headRows != nil {
-					var heads []int
+			// جمع المستلمين حسب المسار
+			var recipients []int
+			if nextStatus == "pending_manager_send" {
+				mgrRows, err := tx.Query("SELECT id FROM users WHERE role = 'manager' AND status = 'active'")
+				if err != nil {
+					return fmt.Errorf("lookup managers: %w", err)
+				}
+				for mgrRows.Next() {
+					var m int
+					if mgrRows.Scan(&m) == nil {
+						recipients = append(recipients, m)
+					}
+				}
+				mgrRows.Close()
+			} else {
+				var deptID sql.NullString
+				if err := tx.QueryRow("SELECT assigned_department FROM requests WHERE id = ?", id).Scan(&deptID); err != nil {
+					return fmt.Errorf("lookup department: %w", err)
+				}
+				if deptID.Valid {
+					headRows, err := tx.Query(
+						"SELECT id FROM users WHERE department_id = ? AND role = 'department_head' AND status = 'active'",
+						deptID.String)
+					if err != nil {
+						return fmt.Errorf("lookup department heads: %w", err)
+					}
 					for headRows.Next() {
 						var h int
 						if headRows.Scan(&h) == nil {
-							heads = append(heads, h)
+							recipients = append(recipients, h)
 						}
 					}
 					headRows.Close()
-					for _, h := range heads {
-						if err := createNotificationTx(tx, h, "بحث جاهز للإرسال للنائب",
-							fmt.Sprintf("المعاون اعتمد بحث الطلب %s. يرجى إرساله للنائب طالب الخدمة", id),
-							"success", strPtr("request"), &id); err != nil {
-							return err
-						}
-					}
 				}
 			}
-			return logActivityTx(tx, userID, userName, "assistant_approve", strPtr("request"), &id, "اعتماد المعاون النهائي")
+
+			notifyMsg := fmt.Sprintf("المعاون اعتمد بحث الطلب %s. يرجى إرساله للنائب طالب الخدمة", id)
+			if nextStatus == "pending_manager_send" {
+				notifyMsg = fmt.Sprintf("المعاون اعتمد بحث الطلب %s وهو ذو خصوصية — يُرسل للنائب عن طريقكم", id)
+			}
+			for _, uid := range recipients {
+				if err := createNotificationTx(tx, uid, "بحث جاهز للإرسال للنائب",
+					notifyMsg, "success", strPtr("request"), &id); err != nil {
+					return err
+				}
+			}
+
+			details := "اعتماد المعاون النهائي (بحث عام → رئيس القسم)"
+			if nextStatus == "pending_manager_send" {
+				details = "اعتماد المعاون النهائي (بحث ذو خصوصية → مدير الدائرة)"
+			}
+			return logActivityTx(tx, userID, userName, "assistant_approve", strPtr("request"), &id, details)
 		}
 
 		// رفض: يرجع للباحث
@@ -635,15 +837,14 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 }
 
 // PUT /api/requests/{id}/dept-send - رئيس القسم يرسل البحث المعتمد للنائب
-// (آخر مرحلة في الـ workflow الجديد)
+// (مسار البحوث العامة)
 func DeptHeadSendToDeputy(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := getUserID(r)
 
-	// التحقق من أن المستخدم رئيس قسم الطلب
-	var assignedDept sql.NullString
+	// التحقق من أن المستخدم رئيس أحد أقسام الطلب
 	var status string
-	if err := db.DB.QueryRow("SELECT assigned_department, status FROM requests WHERE id = ?", id).Scan(&assignedDept, &status); err != nil {
+	if err := db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&status); err != nil {
 		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
 		return
 	}
@@ -651,15 +852,41 @@ func DeptHeadSendToDeputy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الطلب ليس جاهزاً للإرسال للنائب"})
 		return
 	}
-	var userDept sql.NullString
-	logErr("DeptHeadSend user lookup", db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&userDept))
-	if !assignedDept.Valid || !userDept.Valid || assignedDept.String != userDept.String {
+	if allowed, _ := userDepartmentHandlesRequest(id, userID); !allowed {
 		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "هذا الطلب لا يخص قسمك"})
 		return
 	}
 
+	deliverToDeputy(w, id, userID, "dept_send_to_deputy", "إرسال البحث المعتمد للنائب")
+}
+
+// PUT /api/requests/{id}/manager-send - مدير الدائرة يرسل البحث ذا الخصوصية للنائب
+// (مسار البحوث الحساسة: المعاون → مدير الدائرة → النائب)
+func ManagerSendToDeputy(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	var status string
+	if err := db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&status); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
+		return
+	}
+	if status != "pending_manager_send" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "الطلب ليس بانتظار إرسال مدير الدائرة",
+		})
+		return
+	}
+
+	deliverToDeputy(w, id, userID, "manager_send_to_deputy", "إرسال البحث ذي الخصوصية للنائب عبر مدير الدائرة")
+}
+
+// deliverToDeputy المنطق المشترك لتسليم البحث للنائب:
+// تحديث الحالة إلى delivered + إشعار النائب (وSMS) + طلب موافقة الأرشفة من الباحثين.
+// المستدعي مسؤول عن التحقق من الحالة والصلاحية قبل الاستدعاء.
+func deliverToDeputy(w http.ResponseWriter, id string, userID int, action, details string) {
 	var userName string
-	logErr("DeptHeadSend userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+	logErr("deliverToDeputy userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
 
 	txErr := withTx(func(tx *sql.Tx) error {
 		now := time.Now()
@@ -693,7 +920,10 @@ func DeptHeadSendToDeputy(w http.ResponseWriter, r *http.Request) {
 		// إشعار الباحث(ين) لأخذ موافقتهم على الأرشفة
 		researcherRows, _ := tx.Query("SELECT DISTINCT id, researcher_id FROM research_tasks WHERE request_id = ?", id)
 		if researcherRows != nil {
-			type pair struct{ taskID string; researcherID int }
+			type pair struct {
+				taskID       string
+				researcherID int
+			}
 			var pairs []pair
 			for researcherRows.Next() {
 				var p pair
@@ -712,11 +942,11 @@ func DeptHeadSendToDeputy(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		return logActivityTx(tx, userID, userName, "dept_send_to_deputy", strPtr("request"), &id, "إرسال البحث المعتمد للنائب")
+		return logActivityTx(tx, userID, userName, action, strPtr("request"), &id, details)
 	})
 
 	if txErr != nil {
-		log.Printf("DeptHeadSendToDeputy tx failed: %v", txErr)
+		log.Printf("deliverToDeputy (%s) tx failed: %v", action, txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل الإرسال للنائب"})
 		return
 	}

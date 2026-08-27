@@ -23,6 +23,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// ترحيل المخطط: يضيف الأعمدة الجديدة لقواعد البيانات القائمة
+	// (schema.sql يستخدم CREATE TABLE IF NOT EXISTS فلا يُحدّث الجداول الموجودة)
+	if err := db.Migrate(); err != nil {
+		log.Fatalf("❌ فشل ترحيل قاعدة البيانات: %v", err)
+	}
+
 	if os.Getenv("NO_SEED") != "true" {
 		if err := db.Seed(); err != nil {
 			log.Printf("تحذير: فشل إدخال البيانات التجريبية: %v", err)
@@ -69,9 +75,11 @@ func main() {
 	// عرض: النائب يرى طلباته، المدير يرى الكل، القسم يرى طلبات قسمه
 	mux.Handle("GET /api/requests", auth(http.HandlerFunc(handlers.GetRequests)))
 	mux.Handle("GET /api/requests/{id}", auth(http.HandlerFunc(handlers.GetRequest)))
-	// إنشاء: النواب فقط
+	// إنشاء: الجهات الطالبة (نواب/رئاسات/لجان/رؤساء الكتل/مدراء/مستشارين — كلها role='deputy')
 	mux.Handle("POST /api/requests", role("deputy")(http.HandlerFunc(handlers.CreateRequest)))
-	// إحالة لقسم: المدير فقط
+	// تعديل بيانات الطلب: المدير فقط
+	mux.Handle("PUT /api/requests/{id}", role("manager")(http.HandlerFunc(handlers.UpdateRequest)))
+	// إحالة لقسم (مع إمكانية تعيين الباحث مباشرةً): المدير فقط
 	mux.Handle("PUT /api/requests/{id}/assign", role("manager")(http.HandlerFunc(handlers.AssignRequest)))
 	// تأكيد وتعيين باحث(ين): رئيس القسم فقط
 	mux.Handle("PUT /api/requests/{id}/confirm", role("department_head")(http.HandlerFunc(handlers.ConfirmRequest)))
@@ -87,12 +95,16 @@ func main() {
 	mux.Handle("PUT /api/requests/{id}/dept-review", role("department_head")(http.HandlerFunc(handlers.DeptHeadReviewSubmission)))
 	// المعاون يدقق نهائياً
 	mux.Handle("PUT /api/requests/{id}/assistant-review", role("assistant_manager")(http.HandlerFunc(handlers.AssistantFinalReview)))
-	// رئيس القسم يرسل البحث للنائب طالب الخدمة
+	// رئيس القسم يرسل البحث العام للنائب طالب الخدمة
 	mux.Handle("PUT /api/requests/{id}/dept-send", role("department_head")(http.HandlerFunc(handlers.DeptHeadSendToDeputy)))
-	// الباحث يحيل البحث للمعاون للتدقيق النهائي
+	// مدير الدائرة يرسل البحث ذا الخصوصية للنائب
+	mux.Handle("PUT /api/requests/{id}/manager-send", role("manager")(http.HandlerFunc(handlers.ManagerSendToDeputy)))
+	// الباحث يحيل البحث للمعاون (مسار قديم — المدقق اللغوي صار يحيل مباشرةً)
 	mux.Handle("PUT /api/research-tasks/{id}/refer-assistant", role("researcher")(http.HandlerFunc(handlers.ReferToAssistant)))
 	// الباحث يربط ملف بمهمة بحثه
 	mux.Handle("PUT /api/research-tasks/{id}/file", role("researcher")(http.HandlerFunc(handlers.AttachResearchFile)))
+	// إعادة إسناد المهمة لباحث بديل: رئيس القسم أو مدير الدائرة
+	mux.Handle("PUT /api/research-tasks/{id}/reassign", role("department_head", "manager")(http.HandlerFunc(handlers.ReassignResearchTask)))
 
 	// =============================================
 	// المستخدمين - Users
