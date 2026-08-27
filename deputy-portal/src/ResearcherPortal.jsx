@@ -39,7 +39,9 @@ export default function ResearcherPortal({ user, onLogout }) {
   }, [])
 
   const myTasks = tasks
-  const activeTasks = myTasks.filter((t) => ['assigned', 'in_progress'].includes(t.status))
+  // 'returned' ضمن النشطة: البحث المُرجَع من رئيس القسم أو المدقق يحتاج عملاً
+  // من الباحث. كان يسقط من القائمة فيصله إشعار الإرجاع بلا سبيل للتعديل.
+  const activeTasks = myTasks.filter((t) => ['assigned', 'in_progress', 'returned'].includes(t.status))
   const awaitingConsent = myTasks.filter((t) => ['completed'].includes(t.status) && !t.archive_consent)
   const completed = myTasks.filter((t) => t.status === 'completed')
 
@@ -272,7 +274,16 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
             </div>
           )}
 
-          {t.status === 'in_progress' && (
+          {t.status === 'returned' && (
+            <div className="card p-4 bg-red-50 border-red-200">
+              <h4 className="font-bold text-sm mb-1 text-[var(--color-danger-700)]">أُرجع البحث للتعديل</h4>
+              <p className="text-xs text-[var(--color-navy-700)]">
+                راجع ملاحظات رئيس القسم أو المدقق اللغوي، عدّل البحث وارفع النسخة المحدَّثة ثم أعد التسليم.
+              </p>
+            </div>
+          )}
+
+          {(t.status === 'in_progress' || t.status === 'returned') && (
             <div className="card p-4 bg-[var(--color-navy-50)] border-[var(--color-navy-200)] space-y-3">
               <ResearchFileUpload task={t} onUploaded={reloadInPlace} />
               <div className="flex gap-3">
@@ -286,7 +297,7 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
                   disabled={busy}
                   className="btn-success flex-1"
                 >
-                  تسليم البحث للمراجعة
+                  {t.status === 'returned' ? 'إعادة تسليم البحث' : 'تسليم البحث للمراجعة'}
                 </button>
                 <button onClick={() => setShowInfo(true)} disabled={(t.information_requests || []).length >= 3} className="btn-outline flex-1">
                   <IconPlus className="w-4 h-4" />

@@ -192,6 +192,17 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec("UPDATE research_tasks SET status = 'returned', updated_at = ? WHERE id = ?", now, rtID); err != nil {
 				return fmt.Errorf("UPDATE research_task: %w", err)
 			}
+			// الطلب يعود «قيد الإعداد» كما في إرجاع رئيس القسم.
+			// كان يبقى 'proofreading' فيُظهر لمؤشر المراحل لدى الجهة الطالبة
+			// أن البحث عند المدقق بينما هو فعلياً عاد للباحث.
+			var backReqID string
+			if err := tx.QueryRow("SELECT request_id FROM research_tasks WHERE id = ?", rtID).Scan(&backReqID); err != nil {
+				return fmt.Errorf("lookup request_id: %w", err)
+			}
+			if _, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?",
+				now, backReqID); err != nil {
+				return fmt.Errorf("UPDATE requests: %w", err)
+			}
 
 		default:
 			if _, err := tx.Exec("UPDATE proofreading_tasks SET status = ?, updated_at = ? WHERE id = ?", input.Status, now, id); err != nil {
@@ -301,6 +312,15 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 		// رفض → يرجع للباحث
 		if _, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?", now, id); err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		// المهمة تعود «مُرجَعة» كما في مسار إرجاع المدقق اللغوي.
+		// كانت تبقى 'submitted' فتختفي من «مهامي النشطة» لدى الباحث
+		// (تعرض assigned/in_progress فقط) وتظهر له لوحة «قيد المراجعة»
+		// بلا أي أداة — فيصل الإشعار بالإرجاع بلا سبيل للتعديل.
+		if _, err := tx.Exec(
+			"UPDATE research_tasks SET status = 'returned', updated_at = ? WHERE request_id = ? AND status = 'submitted'",
+			now, id); err != nil {
+			return fmt.Errorf("UPDATE research_tasks: %w", err)
 		}
 		var researcherID int
 		_ = tx.QueryRow(`
