@@ -2,8 +2,13 @@
 
 ## نظرة عامة
 
-كل طلب بحثي يمر بـ **state machine** صارمة من 12 حالة، يتم الانتقال بينها
+كل طلب بحثي يمر بـ **state machine** صارمة، يتم الانتقال بين حالاتها
 عبر إجراءات محددة من أدوار محددة.
+
+**مسار التسليم يتفرّع حسب تصنيف السرية** (`requests.confidentiality`):
+البحث `public` يُسلَّم للجهة الطالبة عبر **رئيس القسم**، والبحث `confidential`
+يُسلَّم عبرها **مدير الدائرة**. يحدد التصنيفَ الطالبُ عند التقديم، ويستطيع
+المعاون تصحيحه عند التدقيق النهائي.
 
 ---
 
@@ -11,9 +16,11 @@
 
 ```mermaid
 stateDiagram-v2
-    [*] --> pending: النائب يقدم
-    pending --> assigned: المدير يحيل لقسم/أقسام
+    [*] --> pending: الجهة الطالبة تقدّم
     pending --> returned_exists: المدير يرجع (بحث موجود)
+
+    pending --> assigned: المدير يحيل لقسم/أقسام (بلا تعيين باحث)
+    pending --> in_progress: المدير يحيل ويعيّن الباحث مباشرةً
 
     assigned --> in_progress: رئيس القسم يؤكد + يعين باحث(ين)
 
@@ -22,15 +29,14 @@ stateDiagram-v2
     pending_dept_review --> proofreading: رئيس القسم يعتمد + يعين مدقق
     pending_dept_review --> in_progress: رئيس القسم يرفض
 
-    proofreading --> in_progress: المدقق ينتهي (يعود للباحث)
-    proofreading --> in_progress: المدقق يرجع
+    proofreading --> pending_assistant: المدقق ينتهي (إحالة مباشرة للمعاون)
 
-    in_progress --> pending_assistant: الباحث يحيل للمعاون
-
-    pending_assistant --> pending_dept_send: المعاون يعتمد
+    pending_assistant --> pending_dept_send: المعاون يعتمد (بحث عام)
+    pending_assistant --> pending_manager_send: المعاون يعتمد (بحث ذو خصوصية)
     pending_assistant --> in_progress: المعاون يرفض
 
-    pending_dept_send --> delivered: رئيس القسم يرسل للنائب
+    pending_dept_send --> delivered: رئيس القسم يرسل للجهة الطالبة
+    pending_manager_send --> delivered: مدير الدائرة يرسل للجهة الطالبة
 
     delivered --> completed: الباحث يقرر الأرشفة
     completed --> [*]
@@ -44,16 +50,33 @@ stateDiagram-v2
 |------|------|----------|
 | `pending` | انتظار التوجيه | المدير |
 | `assigned` | محال لقسم/أقسام | رئيس القسم |
-| `confirmed` | مؤكد (مرحلة انتقالية) | تلقائي |
+| `confirmed` | مؤكد (مرحلة انتقالية — غير مستخدمة حالياً) | تلقائي |
 | `in_progress` | قيد الإعداد | الباحث |
 | `pending_dept_review` | مراجعة رئيس القسم | رئيس القسم |
 | `proofreading` | قيد المدقق اللغوي | المدقق |
 | `pending_assistant` | بانتظار المعاون | المعاون |
-| `pending_dept_send` | بانتظار إرسال رئيس القسم | رئيس القسم |
-| `delivered` | مُسلَّم للنائب | الباحث (قرار الأرشفة) |
+| `pending_dept_send` | بانتظار إرسال رئيس القسم (بحث عام) | رئيس القسم |
+| `pending_manager_send` | بانتظار إرسال مدير الدائرة (بحث ذو خصوصية) | مدير الدائرة |
+| `delivered` | مُسلَّم للجهة الطالبة | الباحث (قرار الأرشفة) |
 | `completed` | مكتمل | - (نهائي) |
 | `returned_exists` | لا يمكن التنفيذ (بحث موجود) | - (نهائي) |
 | `rejected` | مرفوض | - (نهائي) |
+
+---
+
+## الجهات الطالبة
+
+الطلبات تُستلَم من ست جهات، كلها تحمل `role='deputy'` وتستخدم بوابة تقديم
+الطلبات نفسها، ويميّزها الحقل `users.requester_type` (يُنسَخ على الطلب وقت التقديم):
+
+| القيمة | الجهة |
+|------|------|
+| `deputy` | نواب |
+| `presidency` | رئاسات |
+| `committee` | لجان |
+| `bloc_leader` | رؤساء الكتل |
+| `director` | مدراء |
+| `advisor` | مستشارين |
 
 ---
 
@@ -74,25 +97,55 @@ Side effects:
 
 ---
 
-### 2️⃣ المدير يحيل لقسم (أو أقسام)
+### 2️⃣ المدير يحيل لقسم (أو أقسام) — ويمكنه تعيين الباحث
 
 **الفاعل**: مدير الدائرة
 **Endpoint**: `PUT /api/requests/{id}/assign`
 
 ```
-Input: department_ids = ["research", "budget_research"]
-Validation: الطلب status='pending'
-Transitions: pending → assigned
+Input:
+  department_ids = ["research", "budget_research"]
+  # اختياري — التعيين المباشر:
+  researcher_ids = [13, 15]
+  service_type, classification, completion_days
+
+Validation:
+  - الطلب status ∈ ('pending', 'assigned')
+  - عند التعيين المباشر: الباحثون نشطون وينتمون لأحد الأقسام المُحالة
+  - عند التعيين المباشر: لا توجد مهام بحث قائمة للطلب
+
+Transitions:
+  بلا باحثين → assigned   (يتولى رئيس القسم التعيين)
+  مع باحثين  → in_progress (يبدأ العمل مباشرةً)
 
 Side effects:
-  - UPDATE requests SET status='assigned', assigned_department=primary
-  - DELETE FROM request_departments WHERE request_id=...
-  - INSERT INTO request_departments لكل قسم
+  - UPDATE requests SET status=..., assigned_department=primary
+  - DELETE ثم INSERT INTO request_departments لكل قسم
+  - عند التعيين المباشر: INSERT OR REPLACE INTO request_confirmations
+    + INSERT INTO research_tasks (مهمة لكل باحث)
   - INSERT INTO activity_logs
-  - INSERT INTO notifications لكل رئيس قسم
+  - INSERT INTO notifications لرؤساء الأقسام (وللباحثين عند التعيين)
 ```
 
-⭐ **ميزة جديدة**: يمكن إحالة نفس الطلب لأكثر من قسم.
+⭐ يمكن إحالة نفس الطلب لأكثر من قسم — ورئيس **أي** قسم من الأقسام المُحالة
+يستطيع التأكيد والمراجعة والإرسال (وليس القسم الرئيسي وحده).
+
+---
+
+### 2️⃣ب تعديل بيانات الطلب
+
+**الفاعل**: مدير الدائرة
+**Endpoint**: `PUT /api/requests/{id}`
+
+```
+Input: title, description, purpose, committee, deadline, can_share, confidentiality
+       (كل الحقول اختيارية — غير المُرسَل يبقى كما هو)
+Validation: الطلب ليس delivered/completed/returned_exists/rejected
+Side effects:
+  - UPDATE requests
+  - INSERT INTO notes (أثر التعديل)
+  - INSERT INTO activity_logs
+```
 
 ---
 
@@ -130,10 +183,16 @@ Side effects:
 
 ```
 أثناء العمل:
-  - الباحث يكتب البحث
-  - يرسل ما يصل لـ 3 طلبات معلومات للجهات الرسمية
-  - يحدث ردود الجهات
+  - الباحث يكتب البحث ويرفع ملفه (PDF/DOC/DOCX حتى 10MB)
+  - يسجّل ما يصل لـ 3 كتب مخاطبة رسمية، ولكل كتاب:
+      target_entity  جهة المخاطبة   (مطلوب)
+      subject        موضوع الكتاب   (مطلوب)
+      number         رقم الكتاب     (اختياري — يُولَّد تلقائياً إن تُرك فارغاً)
+      letter_date    تاريخ الكتاب   (اختياري — تاريخ اليوم افتراضياً)
+  - يحدّث ردود الجهات (رقم كتاب الرد + تاريخه)
 ```
+
+⛔ الباحث يسجّل مخاطبات **مهامه فقط** (تحقق ملكية على الـ endpoint).
 
 ---
 
@@ -178,7 +237,7 @@ Validation: الطلب pending_dept_review + يخص قسم رئيس القسم
 
 ---
 
-### 7️⃣ المدقق اللغوي يدقق
+### 7️⃣ المدقق اللغوي يدقق ← ثم يحيل للمعاون مباشرةً
 
 **الفاعل**: المدقق اللغوي
 **Endpoint**: `PUT /api/proofreading-tasks/{id}/status`
@@ -188,43 +247,53 @@ Input: status='completed', notes
 Transitions:
   - proofreading_task: pending|in_progress → completed
   - research_task: sent_to_proofreader → submitted
-  - request: proofreading → in_progress ⭐
-Side effects:
-  - INSERT INTO notifications للباحث (للإحالة للمعاون)
-```
-
-⭐ **ملاحظة**: الـ request يعود إلى `in_progress` حتى يستطيع الباحث الإحالة
-يدوياً للمعاون (workflow جديد - req.md).
-
----
-
-### 8️⃣ ⭐ الباحث يحيل للمعاون
-
-**الفاعل**: الباحث
-**Endpoint**: `PUT /api/research-tasks/{id}/refer-assistant`
-
-```
-Validation: الطلب في in_progress + الباحث هو المسؤول عن المهمة
-Transitions: in_progress → pending_assistant
+  - request: proofreading → pending_assistant ⭐
 Side effects:
   - INSERT INTO notifications لكل المعاونين النشطين
+  - INSERT INTO notifications للباحث (للعلم)
+```
+
+⭐ **تغيير**: البحث ينتقل من المدقق اللغوي إلى المعاون **مباشرةً**، بلا خطوة
+وسيطة عند الباحث. المسار القديم (`refer-assistant`) ما زال متاحاً للتوافق.
+
+---
+
+### 8️⃣ إعادة إسناد المهمة لباحث بديل (عند الحاجة)
+
+**الفاعل**: رئيس القسم أو مدير الدائرة
+**Endpoint**: `PUT /api/research-tasks/{id}/reassign`
+
+```
+Input: researcher_id (البديل), notes (سبب النقل)
+Validation:
+  - المهمة ليست completed
+  - الباحث البديل نشط ودوره researcher
+  - رئيس القسم مقيَّد بباحثي قسمه؛ مدير الدائرة غير مقيد
+Side effects:
+  - UPDATE research_tasks SET researcher_id=البديل
+    (المهمة تُنقل بمحتواها: الملف والمخاطبات والملاحظات)
+  - INSERT INTO notes (أثر التسليم)
+  - INSERT INTO notifications للباحثَين القديم والجديد
 ```
 
 ---
 
-### 9️⃣ ⭐ المعاون يدقق نهائياً (دور جديد)
+### 9️⃣ المعاون يدقق نهائياً ويوجّه حسب السرية
 
 **الفاعل**: المعاون (`assistant_manager`)
 **Endpoint**: `PUT /api/requests/{id}/assistant-review`
 
 ```
-Input: decision=approve|reject, notes
+Input: decision=approve|reject, notes, confidentiality (اختياري — تصحيح التصنيف)
 
 عند approve:
-  Transitions: pending_assistant → pending_dept_send
+  Transitions:
+    confidentiality='public'       → pending_dept_send    (رئيس القسم)
+    confidentiality='confidential' → pending_manager_send (مدير الدائرة)
   Side effects:
-    - UPDATE requests SET assistant_review_by=userID, assistant_review_date=now
-    - INSERT INTO notifications لرئيس قسم الطلب
+    - UPDATE requests SET status=..., confidentiality=...,
+      assistant_review_by=userID, assistant_review_date=now
+    - INSERT INTO notifications لرؤساء القسم أو لمدراء الدائرة حسب المسار
 
 عند reject:
   Transitions: pending_assistant → in_progress
@@ -235,22 +304,26 @@ Input: decision=approve|reject, notes
 
 ---
 
-### 🔟 ⭐ رئيس القسم يرسل للنائب
+### 🔟 التسليم للجهة الطالبة — مساران
 
-**الفاعل**: رئيس القسم
-**Endpoint**: `PUT /api/requests/{id}/dept-send`
-
+**البحث العام** — الفاعل: رئيس القسم · `PUT /api/requests/{id}/dept-send`
 ```
-Validation:
-  - الطلب pending_dept_send
-  - assigned_department يطابق قسم رئيس القسم
-Transitions: pending_dept_send → delivered
+Validation: الطلب pending_dept_send + قسم المستخدم من الأقسام المُحالة
+```
 
+**البحث ذو الخصوصية** — الفاعل: مدير الدائرة · `PUT /api/requests/{id}/manager-send`
+```
+Validation: الطلب pending_manager_send
+```
+
+كلا المسارين ينفّذان المنطق نفسه (`deliverToDeputy`):
+```
+Transitions: → delivered
 Side effects:
   - UPDATE requests SET status='delivered', completed_date=now,
     delivered_to_deputy_date=now, final_review_by=userID
-  - INSERT INTO notifications للنائب
-  - 📱 SMS hook للنائب (log فقط حالياً، يحتاج SMS gateway)
+  - INSERT INTO notifications للجهة الطالبة
+  - 📱 SMS hook (log فقط حالياً، يحتاج SMS gateway)
   - INSERT INTO notifications لكل الباحثين (لأخذ موافقة الأرشفة)
 ```
 
@@ -303,13 +376,14 @@ Transitions: pending → returned_exists
 | الحدث | المستلم |
 |------|--------|
 | إحالة لقسم | رؤساء الأقسام المُحالة لها |
-| تعيين باحث | الباحث المُعيَّن |
+| تعيين باحث (من المدير أو رئيس القسم) | الباحث المُعيَّن |
 | تسليم البحث | رئيس القسم |
 | اعتماد + إرسال للتدقيق | المدقق اللغوي |
-| اكتمال التدقيق | الباحث |
-| إحالة للمعاون | كل المعاونين النشطين |
-| اعتماد المعاون | رئيس قسم الطلب |
-| إرسال للنائب | النائب (in-app + 📱 SMS hook) |
+| اكتمال التدقيق اللغوي | كل المعاونين النشطين + الباحث (للعلم) |
+| اعتماد المعاون — بحث عام | رؤساء قسم الطلب |
+| اعتماد المعاون — بحث ذو خصوصية | مدراء الدائرة |
+| نقل المهمة لباحث بديل | الباحث القديم والجديد |
+| إرسال للجهة الطالبة | الجهة الطالبة (in-app + 📱 SMS hook) |
 | طلب الأرشفة | الباحث |
 
 ---
@@ -317,11 +391,14 @@ Transitions: pending → returned_exists
 ## القيود (Invariants)
 
 1. ⛔ الطلب لا يمكن إحالته إلا إذا كان `pending` أو `assigned`
-2. ⛔ رئيس القسم يرى/يعدل طلبات قسمه فقط
-3. ⛔ الباحث يرى/يعدل مهامه فقط
+2. ⛔ رئيس القسم يرى/يعدل طلبات **الأقسام المُحالة إليه** (رئيسي أو ضمن `request_departments`)
+3. ⛔ الباحث يرى/يعدل مهامه فقط — بما فيها تسجيل المخاطبات الرسمية
 4. ⛔ الحد الأقصى **3 محاولات** لطلب المعلومات لكل مهمة
-5. ⛔ موافقة الأرشفة تتطلب أن يكون الطلب `delivered`
+5. ⛔ موافقة الأرشفة تتطلب أن يكون الطلب `delivered` أو `completed`
 6. ⛔ التدقيق النهائي للمعاون يتطلب `pending_assistant` حصراً
-7. ⛔ الإرسال للنائب يتطلب `pending_dept_send` حصراً
+7. ⛔ إرسال رئيس القسم يتطلب `pending_dept_send`؛ وإرسال المدير يتطلب `pending_manager_send`
+8. ⛔ تعديل الطلب ممنوع بعد `delivered` / `completed` / `returned_exists` / `rejected`
+9. ⛔ التعيين المباشر من المدير مرفوض إن كانت للطلب مهام بحث قائمة
+10. ⛔ إعادة إسناد المهمة ممنوعة بعد اكتمالها
 
 كل القيود مفروضة في الـ backend عبر validation + transactions.

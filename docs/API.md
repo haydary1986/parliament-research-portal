@@ -53,7 +53,7 @@ Query params: `?status=pending&department=research&page=1&limit=20`
 يُرجع الطلب + التأكيد + الملاحظات + قائمة الأقسام المُحالة.
 
 ### POST `/requests`
-**Roles**: `deputy`
+**Roles**: `deputy` (كل الجهات الطالبة تحمل هذا الدور)
 
 ```json
 {
@@ -61,19 +61,47 @@ Query params: `?status=pending&department=research&page=1&limit=20`
   "description": "...",
   "purpose": "oversight|legislative|other",
   "committee": "اللجنة المالية",
-  "can_share": true
+  "can_share": true,
+  "confidentiality": "public|confidential"
 }
 ```
 
+`requester_type` يُنسخ تلقائياً من حساب المستخدم على الطلب.
+
+### PUT `/requests/{id}` ⭐ **جديد**
+**Roles**: `manager`. تعديل بيانات الطلب. كل الحقول اختيارية.
+
+```json
+{
+  "title": "...",
+  "description": "...",
+  "purpose": "oversight|legislative|other",
+  "committee": "...",
+  "deadline": "2026-06-01",
+  "can_share": true,
+  "confidentiality": "public|confidential"
+}
+```
+مرفوض إن كان الطلب `delivered` / `completed` / `returned_exists` / `rejected`.
+
 ### PUT `/requests/{id}/assign`
-**Roles**: `manager`. **يدعم إحالة لعدة أقسام**.
+**Roles**: `manager`. **يدعم إحالة لعدة أقسام + تعيين الباحث مباشرةً**.
 
 ```json
 // قسم واحد (legacy)
 { "department_id": "research" }
 
-// عدة أقسام (الجديد)
+// عدة أقسام
 { "department_ids": ["research", "budget_research"] }
+
+// عدة أقسام + تعيين مباشر للباحثين (ينقل الطلب إلى in_progress)
+{
+  "department_ids": ["research"],
+  "researcher_ids": [13, 15],
+  "service_type": "دراسة",
+  "classification": "مالية واقتصادية",
+  "completion_days": 30
+}
 ```
 
 ### PUT `/requests/{id}/confirm`
@@ -99,15 +127,27 @@ Query params: `?status=pending&department=research&page=1&limit=20`
 }
 ```
 
-### PUT `/requests/{id}/assistant-review` ⭐ **جديد**
+### PUT `/requests/{id}/assistant-review`
 **Roles**: `assistant_manager`. التدقيق النهائي من المعاون.
 
 ```json
-{ "decision": "approve|reject", "notes": "..." }
+{
+  "decision": "approve|reject",
+  "notes": "...",
+  "confidentiality": "public|confidential"
+}
 ```
+`confidentiality` اختياري — يسمح للمعاون بتصحيح تصنيف الجهة الطالبة.
+عند `approve` يحدد التصنيفُ المسارَ: `public` → `pending_dept_send`،
+و `confidential` → `pending_manager_send`.
 
-### PUT `/requests/{id}/dept-send` ⭐ **جديد**
-**Roles**: `department_head`. إرسال البحث المعتمد للنائب.
+### PUT `/requests/{id}/dept-send`
+**Roles**: `department_head`. إرسال البحث **العام** للجهة الطالبة.
+يتطلب الحالة `pending_dept_send`، وأن يكون قسم المستخدم من الأقسام المُحالة.
+
+### PUT `/requests/{id}/manager-send` ⭐ **جديد**
+**Roles**: `manager`. إرسال البحث **ذي الخصوصية** للجهة الطالبة.
+يتطلب الحالة `pending_manager_send`.
 
 ### PUT `/requests/{id}/return`
 **Roles**: `manager`. إرجاع الطلب لعدم إمكانية التنفيذ.
@@ -133,17 +173,37 @@ Query params: `?status=pending&department=research&page=1&limit=20`
 ```
 
 ### POST `/research-tasks/{id}/info-requests`
-**Roles**: `researcher`. الحد الأقصى **3 محاولات** لكل مهمة.
+**Roles**: `researcher` (مهامه فقط). الحد الأقصى **3 محاولات** لكل مهمة.
+تفاصيل كتاب المخاطبة الرسمي:
 
 ```json
 {
   "target_entity": "وزارة المالية",
-  "subject": "..."
+  "subject": "طلب بيانات الموازنة",
+  "number": "م/2026/512",
+  "letter_date": "2026-03-11"
 }
 ```
+`number` و `letter_date` اختياريان — يُولَّد رقم تلقائي ويُستخدم تاريخ اليوم عند غيابهما.
 
-### PUT `/research-tasks/{id}/refer-assistant` ⭐ **جديد**
-**Roles**: `researcher`. الباحث يحيل البحث للمعاون.
+### PUT `/research-tasks/{id}/file`
+**Roles**: `researcher`. ربط ملف مرفوع بمهمة البحث.
+
+```json
+{ "file_path": "13_1787828194371980000.pdf" }
+```
+
+### PUT `/research-tasks/{id}/reassign` ⭐ **جديد**
+**Roles**: `department_head`, `manager`. نقل المهمة لباحث بديل **بمحتواها كاملاً**.
+
+```json
+{ "researcher_id": 22, "notes": "مغادرة الباحث السابق" }
+```
+رئيس القسم مقيَّد بباحثي قسمه؛ مدير الدائرة غير مقيد. مرفوض إن كانت المهمة `completed`.
+
+### PUT `/research-tasks/{id}/refer-assistant` (قديم — متوافق)
+**Roles**: `researcher`. المسار السابق للإحالة للمعاون.
+حالياً يحيل المدققُ اللغوي البحثَ إلى المعاون تلقائياً.
 
 ### PUT `/research-tasks/{id}/archive-consent`
 **Roles**: `researcher`. موافقة الباحث على الأرشفة.
@@ -204,16 +264,47 @@ Query: `?role=researcher&department=research`
   "password": "min6chars",
   "role": "researcher",
   "department_id": "research",
-  "committee": "اللجنة المالية",   // للنواب فقط
-  "phone": "07XXXXXXXXX"           // للنواب فقط (SMS)
+  "requester_type": "deputy",      // للجهات الطالبة
+  "committees": ["اللجنة المالية"], // للجهات الطالبة (الأولى = الرئيسية)
+  "phone": "07XXXXXXXXX"           // للجهات الطالبة (SMS)
 }
 ```
+
+`requester_type` ∈ `deputy` (نواب) · `presidency` (رئاسات) · `committee` (لجان) ·
+`bloc_leader` (رؤساء الكتل) · `director` (مدراء) · `advisor` (مستشارين).
+
+### POST `/users/bulk`
+**Roles**: `admin`. إنشاء حتى 500 حساب دفعة واحدة بكلمات مرور مولَّدة.
+
+```json
+{
+  "users": [
+    {
+      "name": "د. علي محمد",
+      "email": "ali.m@parliament.iq",
+      "phone": "07701112233",
+      "deputy_id": "DEP-100",
+      "role": "deputy",
+      "requester_type": "committee",
+      "committees": ["اللجنة المالية", "لجنة النزاهة"]
+    }
+  ]
+}
+```
+الاستجابة تُرجع كلمة المرور المولَّدة لكل حساب — تُعرَض مرة واحدة فقط.
 
 ### PUT `/users/{id}/status`
 **Roles**: `admin`, `department_head`
 
 ```json
 { "status": "active|inactive|suspended" }
+```
+
+### PUT `/users/{id}/reset-password`
+**Roles**: `admin`. إعادة تعيين كلمة مرور أي مستخدم بلا الحاجة للقديمة.
+
+```json
+{ "new_password": "min6chars" }
 ```
 
 ---
@@ -300,6 +391,17 @@ file: <binary>
 
 ### GET `/security/stats`
 **Roles**: `admin`. عدد IPs المحظورة والمشبوهة.
+
+---
+
+## ❤️ Health
+
+### GET `/healthz`
+**عام (Public)**. فحص جاهزية الخدمة للـ Docker/Coolify.
+
+```json
+{ "status": "ok" }
+```
 
 ---
 

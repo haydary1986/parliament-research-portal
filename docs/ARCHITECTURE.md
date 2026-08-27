@@ -46,6 +46,7 @@ backend/
 ├── go.mod / go.sum
 ├── db/
 │   ├── db.go             # تهيئة SQLite + Embedded schema/seed
+│   ├── migrate.go        # ترحيل المخطط للقواعد القائمة ⭐
 │   ├── schema.sql        # CREATE TABLE statements (embedded)
 │   └── seed.sql          # بيانات تجريبية (embedded)
 ├── middleware/
@@ -233,6 +234,36 @@ CREATE INDEX idx_research_tasks_request ON research_tasks(request_id);
 -- ...إلخ
 ```
 
+### الترحيل (Migrations) ⚠️ مهم
+
+`schema.sql` يستخدم `CREATE TABLE IF NOT EXISTS`، ما يعني أن **أي عمود جديد لا
+يُنشأ على قاعدة بيانات موجودة** (مثل قاعدة الإنتاج داخل الـ volume). لذلك يوجد
+`db/migrate.go` يُستدعى بين `Init()` و `Seed()` في `main()`:
+
+```go
+db.Init(dbPath)   // ينشئ الجداول الناقصة فقط
+db.Migrate()      // يضيف الأعمدة/القيود الناقصة للجداول القائمة
+db.Seed()         // بيانات تجريبية عند أول تشغيل
+```
+
+آليتان:
+
+| الحالة | الأداة |
+|------|------|
+| عمود جديد | `addColumnIfMissing()` → `ALTER TABLE ... ADD COLUMN` |
+| تغيير قيد `CHECK` | إعادة بناء الجدول (SQLite لا يدعم تعديل CHECK) |
+
+إعادة البناء تتبع إجراء SQLite الرسمي: `PRAGMA foreign_keys=OFF` →
+جدول جديد → نسخ الأعمدة المشتركة → `DROP` القديم → `RENAME` → إعادة الفهارس →
+`PRAGMA foreign_key_check`. تعريف الجدول يُستخرج من `schema.sql` نفسه
+(`extractCreateTable`) فيبقى في مصدر واحد.
+
+كل الترحيلات **idempotent** — تُكتشف الحاجة إليها من `sqlite_master` وتُتخطى إن كان
+المخطط محدَّثاً.
+
+> **عند إضافة عمود جديد**: حدّث `schema.sql` (للقواعد الجديدة) **و** أضف الترحيل
+> المقابل في `migrate.go` (للقواعد القائمة). إغفال الثاني يعمل محلياً ويفشل في الإنتاج.
+
 ### Transactions
 
 كل العمليات متعددة الكتابات داخل `withTx()`:
@@ -291,20 +322,22 @@ mux.Handle("PUT /api/requests/{id}/assistant-review",
 تفاصيل كاملة في [WORKFLOW.md](WORKFLOW.md).
 
 ```
-pending → assigned → confirmed → in_progress → pending_dept_review
-    ↓                                                    ↓
-returned_exists                                  proofreading
-                                                         ↓
-                                                  in_progress*
-                                                         ↓ (refer to assistant)
-                                                  pending_assistant
-                                                         ↓
-                                                  pending_dept_send
-                                                         ↓
-                                                  delivered → completed
+pending → assigned → in_progress → pending_dept_review
+    ↓         (أو مباشرة in_progress             ↓
+returned_exists  إن عيّن المدير الباحث)     proofreading
+                                                 ↓
+                                          pending_assistant
+                                                 ↓
+                        ┌────────────────────────┴────────────────────────┐
+                  بحث عام ↓                                  بحث ذو خصوصية ↓
+                  pending_dept_send                        pending_manager_send
+                  (رئيس القسم)                              (مدير الدائرة)
+                        └────────────────────────┬────────────────────────┘
+                                                 ↓
+                                        delivered → completed
 ```
 
-(*) `in_progress` يعود لأن الباحث يحيل للمعاون يدوياً.
+المسار يتفرّع عند المعاون حسب `requests.confidentiality`.
 
 ---
 
