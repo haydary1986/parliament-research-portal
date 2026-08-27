@@ -157,6 +157,8 @@ function TaskDetailModal({ task, onClose, onChanged }) {
   const [showInfo, setShowInfo] = useState(false)
   const [target, setTarget] = useState('')
   const [subject, setSubject] = useState('')
+  const [letterNumber, setLetterNumber] = useState('')
+  const [letterDate, setLetterDate] = useState('')
   const [consentChoice, setConsentChoice] = useState('approved')
   const [consentNotes, setConsentNotes] = useState('')
   const toast = useToast()
@@ -165,6 +167,7 @@ function TaskDetailModal({ task, onClose, onChanged }) {
     if (!task) { setDetail(null); return }
     setLoading(true)
     setShowInfo(false); setTarget(''); setSubject(''); setConsentNotes('')
+    setLetterNumber(''); setLetterDate('')
     api.getResearchTask(task.id).then((r) => { if (r.success) setDetail(r.data) }).catch(() => {}).finally(() => setLoading(false))
   }, [task])
 
@@ -185,9 +188,14 @@ function TaskDetailModal({ task, onClose, onChanged }) {
     e.preventDefault()
     setBusy(true)
     try {
-      await api.createInfoRequest(t.id, { target_entity: target, subject })
-      toast.success('تم إنشاء طلب المعلومات')
-      setShowInfo(false); setTarget(''); setSubject('')
+      await api.createInfoRequest(t.id, {
+        target_entity: target,
+        subject,
+        number: letterNumber,
+        letter_date: letterDate,
+      })
+      toast.success('تم تسجيل الكتاب')
+      setShowInfo(false); setTarget(''); setSubject(''); setLetterNumber(''); setLetterDate('')
       const r = await api.getResearchTask(t.id)
       if (r.success) setDetail(r.data)
     } catch (err) { toast.error(err.message) }
@@ -264,45 +272,44 @@ function TaskDetailModal({ task, onClose, onChanged }) {
             </div>
           )}
 
-          {/* Workflow الجديد: بعد المدقق اللغوي، الباحث يحيل للمعاون */}
-          {t.status === 'submitted' && (
-            <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
-              <h4 className="font-bold text-sm mb-2 text-[var(--color-navy-900)]">إحالة للمعاون</h4>
-              <p className="text-xs text-[var(--color-navy-600)] mb-3">
-                تم المدقق اللغوي للبحث. يرجى إحالته إلى المعاون للتدقيق النهائي قبل التسليم للنائب.
+          {/* بعد التسليم: البحث يسير في سلسلة المراجعة تلقائياً */}
+          {(t.status === 'submitted' || t.status === 'sent_to_proofreader') && (
+            <div className="card p-4 bg-[var(--color-navy-50)] border-[var(--color-navy-200)]">
+              <h4 className="font-bold text-sm mb-2 text-[var(--color-navy-900)]">البحث قيد المراجعة</h4>
+              <p className="text-xs text-[var(--color-navy-700)]">
+                سُلِّم البحث ويسير الآن في سلسلة المراجعة تلقائياً:
+                رئيس القسم ← المدقق اللغوي ← المعاون ← التسليم للجهة الطالبة.
+                ستصلك إشعارات عند أي إرجاع للتعديل.
               </p>
-              <button
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    await api.referToAssistant(t.id)
-                    toast.success('تمت الإحالة إلى المعاون')
-                    onChanged()
-                  } catch (e) { toast.error(e.message) }
-                  finally { setBusy(false) }
-                }}
-                disabled={busy}
-                className="btn-primary w-full"
-              >
-                {busy ? 'جاري...' : 'إحالة إلى المعاون للتدقيق النهائي'}
-              </button>
             </div>
           )}
 
           {showInfo && (
             <form onSubmit={createInfo} className="card p-4 space-y-3">
-              <h4 className="font-bold text-sm text-[var(--color-navy-900)]">طلب معلومات جديد</h4>
+              <h4 className="font-bold text-sm text-[var(--color-navy-900)]">كتاب مخاطبة رسمي جديد</h4>
               <div>
-                <label className="label label-required">الجهة المستهدفة</label>
+                <label className="label label-required">جهة المخاطبة</label>
                 <input value={target} onChange={(e) => setTarget(e.target.value)} required className="input" placeholder="مثال: وزارة المالية" />
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="label">رقم الكتاب</label>
+                  <input value={letterNumber} onChange={(e) => setLetterNumber(e.target.value)} className="input" placeholder="مثال: م/2026/512" />
+                  <p className="form-hint">يُولَّد تلقائياً إن تُرك فارغاً</p>
+                </div>
+                <div>
+                  <label className="label">تاريخ الكتاب</label>
+                  <input type="date" dir="ltr" value={letterDate} onChange={(e) => setLetterDate(e.target.value)} className="input text-right" />
+                  <p className="form-hint">افتراضياً تاريخ اليوم</p>
+                </div>
+              </div>
               <div>
-                <label className="label label-required">موضوع الطلب</label>
+                <label className="label label-required">موضوع الكتاب</label>
                 <textarea value={subject} onChange={(e) => setSubject(e.target.value)} required className="textarea" rows={3} />
               </div>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setShowInfo(false)} className="btn-outline flex-1">إلغاء</button>
-                <button type="submit" disabled={busy} className="btn-primary flex-1">{busy ? 'جاري...' : 'إرسال'}</button>
+                <button type="submit" disabled={busy} className="btn-primary flex-1">{busy ? 'جاري...' : 'تسجيل الكتاب'}</button>
               </div>
             </form>
           )}
@@ -310,7 +317,7 @@ function TaskDetailModal({ task, onClose, onChanged }) {
           {t.information_requests && t.information_requests.length > 0 && (
             <div className="card">
               <div className="card-header">
-                <h4 className="card-title text-base flex items-center gap-2"><IconMail className="w-4 h-4" /> طلبات المعلومات</h4>
+                <h4 className="card-title text-base flex items-center gap-2"><IconMail className="w-4 h-4" /> المخاطبات الرسمية</h4>
               </div>
               <div className="divide-y divide-[var(--color-border)]">
                 {t.information_requests.map((ir) => (
@@ -319,7 +326,16 @@ function TaskDetailModal({ task, onClose, onChanged }) {
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-sm">{ir.target_entity}</p>
                         <p className="text-xs text-[var(--color-navy-600)] mt-0.5">{ir.subject}</p>
-                        <p className="text-[10px] text-[var(--color-navy-500)] mt-1">المحاولة {ir.attempt_number}/3 • أُرسل {formatDate(ir.date_sent)}</p>
+                        <p className="text-[10px] text-[var(--color-navy-500)] mt-1">
+                          كتاب رقم <span className="font-mono font-semibold">{ir.number}</span>
+                          {' '}بتاريخ {formatDate(ir.date_sent)} • المحاولة {ir.attempt_number}/3
+                        </p>
+                        {ir.response_letter_number && (
+                          <p className="text-[10px] text-[var(--color-success-700)] mt-0.5">
+                            رد الجهة: كتاب <span className="font-mono font-semibold">{ir.response_letter_number}</span>
+                            {ir.response_date && ` بتاريخ ${formatDate(ir.response_date)}`}
+                          </p>
+                        )}
                       </div>
                       <StatusBadge status={ir.status} />
                     </div>

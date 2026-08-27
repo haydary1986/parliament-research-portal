@@ -8,15 +8,20 @@ import { PageLoader } from './components/ui/Spinner'
 import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconRequests, IconDocument, IconClock, IconCheck, IconActivity,
-  IconSearch, IconBuilding, IconArchive, IconShield,
+  IconSearch, IconBuilding, IconArchive, IconShield, IconUsers,
 } from './components/icons/Icons'
-import { formatDate, formatDateTime, PURPOSE_LABELS, MANAGER_DASHBOARD_LABELS } from './lib/format'
+import {
+  formatDate, formatDateTime, PURPOSE_LABELS, MANAGER_DASHBOARD_LABELS,
+  CONFIDENTIALITY_LABELS, REQUESTER_TYPES, SERVICE_TYPES, CLASSIFICATIONS,
+} from './lib/format'
+import { COMMITTEES } from './lib/committees'
 import * as api from './api'
 
 export default function ManagerPortal({ user, onLogout }) {
   const [tab, setTab] = useState('dashboard')
   const [requests, setRequests] = useState([])
   const [departments, setDepartments] = useState([])
+  const [researchers, setResearchers] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
   const [activeRequest, setActiveRequest] = useState(null)
@@ -25,14 +30,16 @@ export default function ManagerPortal({ user, onLogout }) {
   const refresh = async () => {
     setLoading(true)
     try {
-      const [r, d, s] = await Promise.all([
+      const [r, d, s, res] = await Promise.all([
         api.getRequests({ limit: 200 }),
         api.getDepartments(),
         api.getDashboardStats(),
+        api.getUsers({ role: 'researcher', limit: 200 }),
       ])
       if (r.success) setRequests(r.data || [])
       if (d.success) setDepartments(d.data || [])
       if (s.success) setStats(s.data)
+      if (res.success) setResearchers(res.data || [])
     } catch (e) {
       toast.error(e.message)
     } finally { setLoading(false) }
@@ -49,19 +56,26 @@ export default function ManagerPortal({ user, onLogout }) {
 
   const pending = requests.filter((r) => r.status === 'pending')
   const reviews = requests.filter((r) => r.status === 'under_manager_review')
+  // بحوث ذات خصوصية اعتمدها المعاون وتنتظر إرسال مدير الدائرة للنائب
+  const toSend = requests.filter((r) => r.status === 'pending_manager_send')
 
   const navItems = [
     { key: 'dashboard', label: 'لوحة المعلومات', icon: IconDashboard },
     { key: 'pending', label: 'طلبات قيد الإحالة', icon: IconClock, badge: pending.length },
-    { key: 'reviews', label: 'مراجعات نهائية', icon: IconShield, badge: reviews.length },
+    { key: 'to_send', label: 'بحوث للإرسال للنائب', icon: IconShield, badge: toSend.length },
     { key: 'all', label: 'جميع الطلبات', icon: IconRequests },
     { key: 'departments', label: 'الأقسام', icon: IconBuilding },
     { key: 'archive', label: 'البحث في الأرشيف', icon: IconArchive },
   ]
+  // تبويب المراجعات القديم يظهر فقط إن وُجدت طلبات عالقة في المسار السابق
+  if (reviews.length > 0) {
+    navItems.splice(3, 0, { key: 'reviews', label: 'مراجعات نهائية (قديم)', icon: IconCheck, badge: reviews.length })
+  }
 
   const meta = {
     dashboard: { title: 'لوحة المعلومات', subtitle: 'نظرة عامة على عمل دائرة البحوث' },
-    pending: { title: 'الطلبات قيد الإحالة', subtitle: 'طلبات بحاجة إلى إحالة لقسم أو إرجاع' },
+    pending: { title: 'الطلبات قيد الإحالة', subtitle: 'طلبات بحاجة إلى إحالة لقسم أو إرجاع — يمكنك تعيين الباحث مباشرةً' },
+    to_send: { title: 'بحوث بانتظار إرسالك للنائب', subtitle: 'بحوث ذات خصوصية وحساسية اعتمدها المعاون' },
     reviews: { title: 'المراجعات النهائية', subtitle: 'بحوث بانتظار الاعتماد النهائي قبل التسليم' },
     all: { title: 'جميع الطلبات', subtitle: 'سجل كامل لكل الطلبات في الدائرة' },
     departments: { title: 'أقسام الدائرة', subtitle: 'إدارة الأقسام البحثية' },
@@ -83,6 +97,7 @@ export default function ManagerPortal({ user, onLogout }) {
         <>
           {tab === 'dashboard' && <ManagerDashboard stats={stats} requests={requests} departments={departments} onOpen={setActiveRequest} />}
           {tab === 'pending' && <RequestsTable rows={pending} departments={departments} onOpen={setActiveRequest} emptyText="لا توجد طلبات قيد الإحالة" />}
+          {tab === 'to_send' && <RequestsTable rows={toSend} departments={departments} onOpen={setActiveRequest} emptyText="لا توجد بحوث بانتظار إرسالك" />}
           {tab === 'reviews' && <RequestsTable rows={reviews} departments={departments} onOpen={setActiveRequest} emptyText="لا توجد مراجعات نهائية معلقة" />}
           {tab === 'all' && <RequestsTable rows={requests} departments={departments} onOpen={setActiveRequest} withFilter />}
           {tab === 'departments' && <DepartmentsView departments={departments} requests={requests} />}
@@ -93,6 +108,7 @@ export default function ManagerPortal({ user, onLogout }) {
       <RequestDetailModal
         request={activeRequest}
         departments={departments}
+        researchers={researchers}
         onClose={() => setActiveRequest(null)}
         onChanged={() => { setActiveRequest(null); refresh() }}
       />
@@ -350,19 +366,27 @@ function ArchiveSearch() {
   )
 }
 
-function RequestDetailModal({ request, departments, onClose, onChanged }) {
+function RequestDetailModal({ request, departments, researchers = [], onClose, onChanged }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(false)
   const [selectedDepts, setSelectedDepts] = useState([])
   const [busy, setBusy] = useState(false)
   const [reviewDecision, setReviewDecision] = useState('approve')
   const [reviewNotes, setReviewNotes] = useState('')
+  // تعيين الباحث مباشرةً من مدير الدائرة (اختياري)
+  const [assignResearchers, setAssignResearchers] = useState([])
+  const [serviceType, setServiceType] = useState(SERVICE_TYPES[0])
+  const [classification, setClassification] = useState(CLASSIFICATIONS[0])
+  const [days, setDays] = useState(30)
+  const [editOpen, setEditOpen] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
     if (!request) { setDetail(null); return }
     setLoading(true)
     setReviewNotes('')
+    setAssignResearchers([])
+    setEditOpen(false)
     api.getRequest(request.id)
       .then((r) => {
         if (r.success) {
@@ -379,9 +403,28 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
   if (!request) return null
   const d = detail || request
 
+  // الباحثون المتاحون = المنتمون للأقسام المحددة حالياً
+  const eligibleResearchers = researchers.filter(
+    (r) => r.department_id && selectedDepts.includes(r.department_id) && r.status === 'active'
+  )
+
   const toggleDept = (id) => {
-    setSelectedDepts((prev) =>
-      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]
+    setSelectedDepts((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      // إسقاط أي باحث لم يعد قسمه ضمن المحدَّد
+      setAssignResearchers((rs) =>
+        rs.filter((rid) => {
+          const res = researchers.find((x) => x.id === rid)
+          return res && next.includes(res.department_id)
+        })
+      )
+      return next
+    })
+  }
+
+  const toggleResearcher = (id) => {
+    setAssignResearchers((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
     )
   }
 
@@ -389,8 +432,26 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
     if (selectedDepts.length === 0) return toast.error('اختر قسماً واحداً على الأقل')
     setBusy(true)
     try {
-      await api.assignRequest(d.id, selectedDepts)
-      toast.success(selectedDepts.length > 1 ? `تمت الإحالة إلى ${selectedDepts.length} أقسام` : 'تمت الإحالة')
+      const extra = assignResearchers.length > 0
+        ? {
+            researcher_ids: assignResearchers,
+            service_type: serviceType,
+            classification,
+            completion_days: parseInt(days, 10),
+          }
+        : {}
+      const res = await api.assignRequest(d.id, selectedDepts, extra)
+      toast.success(res.message || 'تمت الإحالة')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  const sendToDeputy = async () => {
+    setBusy(true)
+    try {
+      await api.managerSendToDeputy(d.id)
+      toast.success('تم إرسال البحث للنائب')
       onChanged()
     } catch (e) { toast.error(e.message) }
     finally { setBusy(false) }
@@ -429,13 +490,48 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
           </div>
 
           <div className="grid grid-cols-2 gap-4 p-4 bg-[var(--color-surface-soft)] rounded-xl">
-            <Field label="النائب" value={d.deputy_name} />
+            <Field label="الجهة الطالبة" value={d.deputy_name} />
+            <Field label="نوع الجهة" value={REQUESTER_TYPES[d.requester_type] || 'نائب'} />
             <Field label="اللجنة" value={d.committee} />
             <Field label="الغرض" value={PURPOSE_LABELS[d.purpose] || '—'} />
+            <Field label="تصنيف البحث" value={CONFIDENTIALITY_LABELS[d.confidentiality] || 'عام'} />
             <Field label="تاريخ التقديم" value={formatDate(d.date_received)} />
             <Field label="الموعد النهائي" value={formatDate(d.deadline)} />
             <Field label="موافقة على النشر" value={d.can_share ? '✓ نعم' : '✗ لا'} />
           </div>
+
+          {/* تعديل بيانات الطلب — متاح ما لم يُسلَّم الطلب */}
+          {!['delivered', 'completed', 'returned_exists', 'rejected'].includes(d.status) && (
+            <div>
+              <button onClick={() => setEditOpen((o) => !o)} className="btn-outline btn-sm">
+                {editOpen ? 'إخفاء التعديل' : '✎ تعديل بيانات الطلب'}
+              </button>
+              {editOpen && (
+                <EditRequestForm
+                  request={d}
+                  busy={busy}
+                  setBusy={setBusy}
+                  onSaved={onChanged}
+                />
+              )}
+            </div>
+          )}
+
+          {/* إرسال البحث ذي الخصوصية للنائب */}
+          {d.status === 'pending_manager_send' && (
+            <div className="card p-4 bg-[var(--color-danger-50)] border-[var(--color-danger-600)]">
+              <h4 className="font-bold text-sm mb-2 text-[var(--color-navy-900)]">
+                إرسال البحث للنائب — بحث ذو خصوصية وحساسية
+              </h4>
+              <p className="text-xs text-[var(--color-navy-700)] mb-3">
+                اعتمد المعاون هذا البحث، ولخصوصيته يُسلَّم للنائب طالب الخدمة عن طريقكم مباشرةً.
+              </p>
+              <button onClick={sendToDeputy} disabled={busy} className="btn-success w-full">
+                <IconCheck className="w-4 h-4" />
+                <span>{busy ? 'جاري الإرسال...' : 'إرسال للنائب'}</span>
+              </button>
+            </div>
+          )}
 
           {/* 🏢 الأقسام التي أُحيل إليها الطلب - مرئية دائماً عند وجود إحالة */}
           {d.assigned_departments && d.assigned_departments.length > 0 && (
@@ -495,9 +591,68 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
                   )
                 })}
               </div>
-              <div className="flex gap-2">
+              {/* تعيين الباحث مباشرةً (اختياري) */}
+              <div className="pt-3 mt-1 border-t border-[var(--color-navy-200)]">
+                <div className="flex items-center gap-2 mb-1">
+                  <IconUsers className="w-4 h-4 text-[var(--color-gold-700)]" />
+                  <h5 className="font-bold text-sm text-[var(--color-navy-900)]">تعيين الباحث/الباحثين (اختياري)</h5>
+                </div>
+                <p className="text-xs text-[var(--color-navy-600)] mb-3">
+                  اتركه فارغاً ليتولى رئيس القسم التعيين، أو عيّن الباحثين الآن ليبدأ العمل مباشرةً
+                </p>
+
+                {selectedDepts.length === 0 ? (
+                  <p className="text-xs text-[var(--color-navy-500)]">اختر قسماً أولاً لعرض باحثيه</p>
+                ) : eligibleResearchers.length === 0 ? (
+                  <p className="text-xs text-[var(--color-navy-500)]">لا يوجد باحثون نشطون في الأقسام المحددة</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 max-h-48 overflow-y-auto">
+                      {eligibleResearchers.map((res) => {
+                        const checked = assignResearchers.includes(res.id)
+                        const deptName = departments.find((x) => x.id === res.department_id)?.name || res.department_id
+                        return (
+                          <label key={res.id} className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition ${
+                            checked ? 'border-[var(--color-gold-500)] bg-white' : 'border-[var(--color-border)] bg-white/50 hover:bg-white'
+                          }`}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleResearcher(res.id)} className="w-4 h-4" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold truncate">{res.name}</p>
+                              <p className="text-[10px] text-[var(--color-navy-500)] truncate">{deptName}</p>
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+
+                    {assignResearchers.length > 0 && (
+                      <div className="grid grid-cols-2 gap-3 mb-1">
+                        <div>
+                          <label className="label label-required">نوع الخدمة</label>
+                          <select className="select" value={serviceType} onChange={(e) => setServiceType(e.target.value)}>
+                            {SERVICE_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="label label-required">التصنيف</label>
+                          <select className="select" value={classification} onChange={(e) => setClassification(e.target.value)}>
+                            {CLASSIFICATIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="label label-required">مدة الإنجاز (أيام)</label>
+                          <input type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} className="input" />
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="flex gap-2 mt-3">
                 <button onClick={assign} disabled={busy || selectedDepts.length === 0} className="btn-primary flex-1">
                   {d.status === 'pending' ? 'إحالة' : 'حفظ التغييرات'} {selectedDepts.length > 0 && `(${selectedDepts.length})`}
+                  {assignResearchers.length > 0 && ` + ${assignResearchers.length} باحث`}
                 </button>
                 {d.status === 'pending' && (
                   <button onClick={returnReq} disabled={busy} className="btn-outline flex-1">لا يمكن التنفيذ</button>
@@ -564,6 +719,89 @@ function RequestDetailModal({ request, departments, onClose, onChanged }) {
         </div>
       )}
     </Modal>
+  )
+}
+
+// نموذج تعديل بيانات الطلب من مدير الدائرة
+function EditRequestForm({ request, busy, setBusy, onSaved }) {
+  const [title, setTitle] = useState(request.title || '')
+  const [description, setDescription] = useState(request.description || '')
+  const [purpose, setPurpose] = useState(request.purpose || 'oversight')
+  const [committee, setCommittee] = useState(request.committee || '')
+  const [confidentiality, setConfidentiality] = useState(request.confidentiality || 'public')
+  const [canShare, setCanShare] = useState(!!request.can_share)
+  const [deadline, setDeadline] = useState(
+    request.deadline ? String(request.deadline).slice(0, 10) : ''
+  )
+  const toast = useToast()
+
+  const save = async (e) => {
+    e.preventDefault()
+    if (title.trim().length < 5) return toast.error('العنوان قصير جداً')
+    setBusy(true)
+    try {
+      await api.updateRequest(request.id, {
+        title: title.trim(),
+        description,
+        purpose,
+        committee,
+        confidentiality,
+        can_share: canShare,
+        deadline,
+      })
+      toast.success('تم تعديل الطلب')
+      onSaved()
+    } catch (err) { toast.error(err.message) }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <form onSubmit={save} className="card p-4 mt-3 space-y-3 bg-[var(--color-surface-soft)]">
+      <div>
+        <label className="label label-required">عنوان البحث</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} required className="input" />
+      </div>
+      <div>
+        <label className="label">الوصف</label>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)} className="textarea" rows={3} />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="label">الغرض</label>
+          <select className="select" value={purpose} onChange={(e) => setPurpose(e.target.value)}>
+            <option value="oversight">رقابي</option>
+            <option value="legislative">تشريعي</option>
+            <option value="other">أخرى</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">تصنيف البحث</label>
+          <select className="select" value={confidentiality} onChange={(e) => setConfidentiality(e.target.value)}>
+            {Object.entries(CONFIDENTIALITY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">اللجنة</label>
+          <select className="select" value={committee} onChange={(e) => setCommittee(e.target.value)}>
+            <option value="">— بدون —</option>
+            {/* اللجنة قد تكون مركّبة من عدة لجان، نعرضها كما هي إن لم تطابق القائمة */}
+            {committee && !COMMITTEES.includes(committee) && <option value={committee}>{committee}</option>}
+            {COMMITTEES.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">الموعد النهائي</label>
+          <input type="date" dir="ltr" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="input text-right" />
+        </div>
+      </div>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" checked={canShare} onChange={(e) => setCanShare(e.target.checked)} className="w-4 h-4" />
+        <span className="text-sm">موافقة الجهة الطالبة على نشر/توزيع البحث</span>
+      </label>
+      <button type="submit" disabled={busy} className="btn-gold w-full">
+        {busy ? 'جاري الحفظ...' : 'حفظ التعديلات'}
+      </button>
+    </form>
   )
 }
 

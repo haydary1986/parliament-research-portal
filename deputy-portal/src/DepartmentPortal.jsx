@@ -125,6 +125,7 @@ export default function DepartmentPortal({ user, onLogout }) {
       <ResearchTaskModal
         task={activeTask}
         proofreaders={proofreaders}
+        researchers={researchers}
         onClose={() => setActiveTask(null)}
         onChanged={() => { setActiveTask(null); refresh() }}
       />
@@ -530,12 +531,20 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
   )
 }
 
-function ResearchTaskModal({ task, proofreaders, onClose, onChanged }) {
+function ResearchTaskModal({ task, proofreaders, researchers = [], onClose, onChanged }) {
   const [proofId, setProofId] = useState('')
+  const [newResearcherId, setNewResearcherId] = useState('')
+  const [handoverNotes, setHandoverNotes] = useState('')
+  const [showReassign, setShowReassign] = useState(false)
   const [busy, setBusy] = useState(false)
   const toast = useToast()
 
-  useEffect(() => { setProofId('') }, [task])
+  useEffect(() => {
+    setProofId('')
+    setNewResearcherId('')
+    setHandoverNotes('')
+    setShowReassign(false)
+  }, [task])
   if (!task) return null
 
   const sendToProofreading = async () => {
@@ -548,6 +557,20 @@ function ResearchTaskModal({ task, proofreaders, onClose, onChanged }) {
     } catch (e) { toast.error(e.message) }
     finally { setBusy(false) }
   }
+
+  const reassign = async () => {
+    if (!newResearcherId) return toast.error('اختر الباحث البديل')
+    setBusy(true)
+    try {
+      const res = await api.reassignResearchTask(task.id, parseInt(newResearcherId), handoverNotes)
+      toast.success(res.message || 'تم نقل المهمة')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  // الباحثون المتاحون للنقل = باحثو القسم عدا الباحث الحالي
+  const alternatives = researchers.filter((r) => r.id !== task.researcher_id && r.status === 'active')
 
   return (
     <Modal open={!!task} onClose={onClose} title={`المهمة ${task.id}`} size="md">
@@ -575,6 +598,50 @@ function ResearchTaskModal({ task, proofreaders, onClose, onChanged }) {
                 {busy ? 'جاري...' : 'إرسال للتدقيق'}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* نقل المهمة لباحث بديل عند تغيّر الباحث في الدائرة */}
+        {task.status !== 'completed' && (
+          <div>
+            <button onClick={() => setShowReassign((s) => !s)} className="btn-outline btn-sm w-full">
+              {showReassign ? 'إلغاء النقل' : '⇄ نقل المهمة لباحث بديل'}
+            </button>
+            {showReassign && (
+              <div className="card p-4 mt-3 bg-[var(--color-surface-soft)] space-y-3">
+                <p className="text-xs text-[var(--color-navy-700)]">
+                  تُنقل المهمة بمحتواها كاملاً — الملف والمخاطبات الرسمية والملاحظات —
+                  فيكمل الباحث الجديد من حيث توقّف السابق.
+                </p>
+                {alternatives.length === 0 ? (
+                  <p className="text-xs text-[var(--color-navy-500)]">لا يوجد باحث بديل نشط في القسم</p>
+                ) : (
+                  <>
+                    <div>
+                      <label className="label label-required">الباحث البديل</label>
+                      <select className="select" value={newResearcherId} onChange={(e) => setNewResearcherId(e.target.value)}>
+                        <option value="">اختر الباحث...</option>
+                        {alternatives.map((r) => (
+                          <option key={r.id} value={r.id}>{r.name}{r.specialization ? ` — ${r.specialization}` : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">سبب النقل</label>
+                      <input
+                        value={handoverNotes}
+                        onChange={(e) => setHandoverNotes(e.target.value)}
+                        className="input"
+                        placeholder="مثال: مغادرة الباحث السابق"
+                      />
+                    </div>
+                    <button onClick={reassign} disabled={busy || !newResearcherId} className="btn-primary w-full">
+                      {busy ? 'جاري النقل...' : 'تأكيد نقل المهمة'}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

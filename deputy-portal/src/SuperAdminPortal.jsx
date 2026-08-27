@@ -9,7 +9,7 @@ import {
   IconDashboard, IconUsers, IconBuilding, IconActivity, IconShield,
   IconDocument, IconPlus, IconSearch, IconParliament,
 } from './components/icons/Icons'
-import { formatDate, formatDateTime, ROLE_LABELS } from './lib/format'
+import { formatDate, formatDateTime, ROLE_LABELS, REQUESTER_TYPES } from './lib/format'
 import { COMMITTEES } from './lib/committees'
 import * as api from './api'
 import * as XLSX from 'xlsx'
@@ -233,7 +233,13 @@ function UsersView({ users, onChanged }) {
                   </div>
                 </td>
                 <td className="text-xs font-mono" dir="ltr">{u.email}</td>
-                <td><span className="badge-navy">{ROLE_LABELS[u.role] || u.role}</span></td>
+                <td>
+                  <span className="badge-navy">{ROLE_LABELS[u.role] || u.role}</span>
+                  {/* الجهات الطالبة غير النواب تُميَّز بنوعها */}
+                  {u.role === 'deputy' && u.requester_type && u.requester_type !== 'deputy' && (
+                    <span className="badge-gold text-[10px] mr-1">{REQUESTER_TYPES[u.requester_type]}</span>
+                  )}
+                </td>
                 <td className="text-sm">{u.department_id || '—'}</td>
                 <td>
                   <span className={u.status === 'active' ? 'badge-success' : 'badge-neutral'}>
@@ -377,11 +383,12 @@ function BulkImportModal({ open, onClose, onDone }) {
   const [step, setStep] = useState('upload') // upload | preview | done
   const [rows, setRows] = useState([])
   const [results, setResults] = useState([])
+  const [requesterType, setRequesterType] = useState('deputy')
   const [busy, setBusy] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
-    if (open) { setStep('upload'); setRows([]); setResults([]) }
+    if (open) { setStep('upload'); setRows([]); setResults([]); setRequesterType('deputy') }
   }, [open])
 
   // قراءة ملف Excel - أعمدة متوقعة:
@@ -460,6 +467,7 @@ function BulkImportModal({ open, onClose, onDone }) {
         phone: u.phone || undefined,
         deputy_id: u.deputy_id || undefined,
         role: u.role,
+        requester_type: requesterType,
         committees: u.committees,
       })))
       if (r.success) {
@@ -570,6 +578,18 @@ function BulkImportModal({ open, onClose, onDone }) {
 
       {step === 'preview' && (
         <div>
+          <div className="form-group">
+            <label className="label label-required" htmlFor="bulk-requester-type">نوع الجهة الطالبة لهذه الدفعة</label>
+            <select
+              id="bulk-requester-type"
+              className="select"
+              value={requesterType}
+              onChange={(e) => setRequesterType(e.target.value)}
+            >
+              {Object.entries(REQUESTER_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <p className="form-hint">يُطبَّق على كل الصفوف. استورد كل جهة في دفعة منفصلة.</p>
+          </div>
           <p className="text-sm text-[var(--color-navy-600)] mb-3">
             راجع البيانات أدناه. سيتم توليد كلمات مرور عشوائية تلقائياً.
           </p>
@@ -744,6 +764,7 @@ function CreateUserModal({ open, departments, onClose, onCreated }) {
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('researcher')
   const [departmentId, setDepartmentId] = useState('')
+  const [requesterType, setRequesterType] = useState('deputy')
   const [committees, setCommittees] = useState([])
   const [phone, setPhone] = useState('')
   const [busy, setBusy] = useState(false)
@@ -753,6 +774,7 @@ function CreateUserModal({ open, departments, onClose, onCreated }) {
     if (open) {
       setName(''); setEmail(''); setPassword('')
       setRole('researcher'); setDepartmentId('')
+      setRequesterType('deputy')
       setCommittees([]); setPhone('')
     }
   }, [open])
@@ -774,6 +796,7 @@ function CreateUserModal({ open, departments, onClose, onCreated }) {
       await api.createUser({
         name, email, password, role,
         department_id: needsDept ? departmentId : null,
+        requester_type: isDeputy ? requesterType : 'deputy',
         committees: isDeputy ? committees : [],
         phone: isDeputy && phone ? phone : null,
       })
@@ -825,6 +848,13 @@ function CreateUserModal({ open, departments, onClose, onCreated }) {
         )}
         {isDeputy && (
           <>
+            <div className="form-group">
+              <label className="label label-required">نوع الجهة الطالبة</label>
+              <select className="select" value={requesterType} onChange={(e) => setRequesterType(e.target.value)}>
+                {Object.entries(REQUESTER_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <p className="form-hint">كل هذه الجهات تستخدم بوابة تقديم الطلبات نفسها</p>
+            </div>
             <div className="form-group">
               <label className="label label-required">اللجان النيابية (يمكن اختيار أكثر من واحدة)</label>
               <p className="form-hint mb-2">الأولى تُعتبر اللجنة الرئيسية. {committees.length} مختارة</p>

@@ -10,7 +10,10 @@ import {
   IconDashboard, IconRequests, IconPlus, IconDocument, IconClock,
   IconCheck, IconActivity, IconSearch,
 } from './components/icons/Icons'
-import { formatDate, formatDateTime, PURPOSE_LABELS, REQUEST_STAGES, getRequestStage } from './lib/format'
+import {
+  formatDate, formatDateTime, PURPOSE_LABELS, REQUEST_STAGES, getRequestStage,
+  CONFIDENTIALITY_LABELS,
+} from './lib/format'
 import { COMMITTEES } from './lib/committees'
 import * as api from './api'
 
@@ -225,6 +228,7 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
   const [purpose, setPurpose] = useState('oversight')
   const [committees, setCommittees] = useState([])
   const [canShare, setCanShare] = useState(false)
+  const [confidentiality, setConfidentiality] = useState('public')
   const [busy, setBusy] = useState(false)
   const toast = useToast()
 
@@ -236,6 +240,7 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
       // افتراضياً نختار كل لجان النائب
       setCommittees(Array.isArray(defaultCommittees) ? defaultCommittees.filter((c) => COMMITTEES.includes(c)) : [])
       setCanShare(false)
+      setConfidentiality('public')
     }
   }, [open, defaultCommittees])
 
@@ -255,6 +260,7 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
         title, description, purpose,
         committee: committees.join('، '),
         can_share: canShare,
+        confidentiality,
       })
       onCreated()
     } catch (err) {
@@ -277,6 +283,16 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
       }
     >
       <form id="req-form" onSubmit={submit} className="space-y-4">
+        {/* تنبيه إلزامي: كل بحث في طلب مستقل (req.md - بوابة النواب) */}
+        <div className="flex items-start gap-2 p-3 rounded-lg border-2 border-[var(--color-danger-600)] bg-[var(--color-danger-50)]">
+          <svg className="w-5 h-5 flex-shrink-0 mt-0.5 text-[var(--color-danger-600)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+          </svg>
+          <p className="text-sm font-bold text-[var(--color-danger-700)]">
+            يُرجى كتابة كل بحث في طلب واحد منفصل عن الآخر — لا تجمع أكثر من موضوع بحثي في طلب واحد.
+          </p>
+        </div>
+
         <div className="form-group">
           <label className="label label-required">عنوان البحث</label>
           <input value={title} onChange={(e) => setTitle(e.target.value)} required className="input" placeholder="مثال: دراسة حول الأثر الاقتصادي لقانون..." />
@@ -313,6 +329,39 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
             <option value="other">أخرى</option>
           </select>
         </div>
+        <div className="form-group">
+          <label className="label label-required">تصنيف البحث</label>
+          <p className="form-hint mb-2">يحدد مسار التسليم: البحث العام يُسلَّم عبر رئيس القسم، وذو الخصوصية يُسلَّم عبر مدير الدائرة</p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            {Object.entries(CONFIDENTIALITY_LABELS).map(([value, label]) => {
+              const checked = confidentiality === value
+              const danger = value === 'confidential'
+              return (
+                <label
+                  key={value}
+                  className={`flex-1 cursor-pointer p-3 rounded-lg border-2 transition ${
+                    checked
+                      ? danger
+                        ? 'border-[var(--color-danger-600)] bg-[var(--color-danger-50)]'
+                        : 'border-[var(--color-success-600)] bg-[var(--color-success-50)]'
+                      : 'border-[var(--color-border)] hover:bg-[var(--color-surface-soft)]'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="confidentiality"
+                    value={value}
+                    checked={checked}
+                    onChange={(e) => setConfidentiality(e.target.value)}
+                    className="sr-only"
+                  />
+                  <span className="font-semibold text-sm">{label}</span>
+                </label>
+              )
+            })}
+          </div>
+        </div>
+
         <div className="form-group p-4 rounded-xl bg-[var(--color-gold-50)] border border-[var(--color-gold-200)]">
           <label className="flex items-start gap-3 cursor-pointer">
             <input
@@ -332,8 +381,8 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
   )
 }
 
-function StageTracker({ status }) {
-  const current = getRequestStage(status)
+function StageTracker({ status, lettersCount = 0 }) {
+  const current = getRequestStage(status, lettersCount)
   const currentIdx = REQUEST_STAGES.findIndex((s) => s.key === current.key)
 
   return (
@@ -400,7 +449,7 @@ function RequestDetailModal({ request, onClose }) {
           </div>
 
           {/* عرض المراحل التفصيلية للنائب (نقطة 5 من بوابة النواب) */}
-          <StageTracker status={d.status} />
+          <StageTracker status={d.status} lettersCount={d.official_letters_count || 0} />
 
           <div className="grid grid-cols-2 gap-4 p-4 bg-[var(--color-surface-soft)] rounded-xl">
             <Field label="اللجنة" value={d.committee} />
@@ -410,6 +459,7 @@ function RequestDetailModal({ request, onClose }) {
                 ? `${d.assigned_departments.length} أقسام`
                 : (d.assigned_department || '—')
             } />
+            <Field label="تصنيف البحث" value={CONFIDENTIALITY_LABELS[d.confidentiality] || 'عام'} />
             <Field label="موافقة على النشر" value={d.can_share ? '✓ نعم' : '✗ لا'} />
             <Field label="تاريخ التقديم" value={formatDate(d.date_received)} />
             <Field label="الموعد النهائي" value={formatDate(d.deadline)} />

@@ -48,25 +48,65 @@ export const PURPOSE_LABELS = {
 export const SERVICE_TYPES = ['دراسة', 'تقرير', 'ورقة إحاطة', 'بيان رأي', 'سؤال نيابي']
 export const CLASSIFICATIONS = ['علمي', 'اجتماعي', 'سياسي', 'قانوني', 'مالية واقتصادية']
 
-// مراحل سير الطلب التفصيلية للنائب
+// مراحل سير الطلب التفصيلية للطالب
 // مرجع: req.md - بوابة النواب نقطة 5
 export const REQUEST_STAGES = [
-  { key: 'routing',        label: 'التوجيه إلى القسم',                        statuses: ['pending', 'assigned'] },
-  { key: 'researcher',     label: 'التوجيه للباحث',                            statuses: ['confirmed'] },
-  { key: 'sources',        label: 'جمع المصادر',                              statuses: ['in_progress'] },
-  { key: 'official_corr',  label: 'إجراء مخاطبات رسمية لطلب البيانات والمعلومات', statuses: [] },
-  { key: 'analysis',       label: 'تحليل',                                    statuses: ['pending_dept_review'] },
-  { key: 'proofreading',   label: 'المدقق اللغوي',                            statuses: ['proofreading'] },
-  { key: 'final_review',   label: 'التدقيق النهائي',                          statuses: ['pending_assistant', 'pending_dept_send', 'under_manager_review'] },
-  { key: 'delivered',      label: 'تم التسليم',                                statuses: ['delivered', 'completed'] },
+  { key: 'routing',       label: 'التوجيه إلى القسم' },
+  { key: 'researcher',    label: 'التوجيه للباحث' },
+  { key: 'sources',       label: 'جمع المصادر' },
+  { key: 'official_corr', label: 'إجراء مخاطبات رسمية لطلب البيانات والمعلومات' },
+  { key: 'analysis',      label: 'تحليل' },
+  { key: 'proofreading',  label: 'المدقق اللغوي' },
+  { key: 'final_review',  label: 'التدقيق النهائي' },
+  { key: 'delivered',     label: 'تم التسليم' },
 ]
 
-// إرجاع المرحلة الحالية لطلب بناءً على الـ status
-export function getRequestStage(status) {
-  for (const stage of REQUEST_STAGES) {
-    if (stage.statuses.includes(status)) return stage
+// الحالات التي تُثبّت مرحلة بعينها مباشرةً
+const STAGE_BY_STATUS = {
+  pending: 'routing',
+  assigned: 'researcher',
+  confirmed: 'researcher',
+  // in_progress يُحسَب ديناميكياً (جمع مصادر / مخاطبات) — انظر أدناه
+  review: 'analysis',
+  pending_dept_review: 'analysis',
+  proofreading: 'proofreading',
+  pending_assistant: 'final_review',
+  pending_dept_send: 'final_review',
+  pending_manager_send: 'final_review',
+  under_manager_review: 'final_review',
+  delivered: 'delivered',
+  completed: 'delivered',
+}
+
+/**
+ * إرجاع المرحلة الحالية للطلب.
+ * `officialLettersCount` يميّز بين «جمع المصادر» و«إجراء مخاطبات رسمية»
+ * وكلاهما يقع ضمن الحالة in_progress.
+ */
+export function getRequestStage(status, officialLettersCount = 0) {
+  if (status === 'in_progress') {
+    return officialLettersCount > 0
+      ? REQUEST_STAGES.find((s) => s.key === 'official_corr')
+      : REQUEST_STAGES.find((s) => s.key === 'sources')
   }
-  return REQUEST_STAGES[0]
+  const key = STAGE_BY_STATUS[status]
+  return REQUEST_STAGES.find((s) => s.key === key) || REQUEST_STAGES[0]
+}
+
+// الجهات الطالبة (req.md: نواب – رئاسات – لجان – رؤساء الكتل – مدراء – مستشارين)
+export const REQUESTER_TYPES = {
+  deputy: 'نائب',
+  presidency: 'رئاسات',
+  committee: 'لجان',
+  bloc_leader: 'رؤساء الكتل',
+  director: 'مدراء',
+  advisor: 'مستشارين',
+}
+
+// تصنيف سرية البحث — يحدد مسار التسليم للنائب
+export const CONFIDENTIALITY_LABELS = {
+  public: 'عام',
+  confidential: 'ذو خصوصية وحساسية',
 }
 
 // تصنيف لوحة المعلومات للمدير (req.md - بوابة المدير نقطة 2)

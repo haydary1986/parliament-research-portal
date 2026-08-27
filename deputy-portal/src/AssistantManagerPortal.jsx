@@ -9,7 +9,7 @@ import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconShield, IconClock, IconCheck, IconDocument, IconActivity,
 } from './components/icons/Icons'
-import { formatDate, formatDateTime, PURPOSE_LABELS } from './lib/format'
+import { formatDate, formatDateTime, PURPOSE_LABELS, CONFIDENTIALITY_LABELS, REQUESTER_TYPES } from './lib/format'
 import * as api from './api'
 
 export default function AssistantManagerPortal({ user, onLogout }) {
@@ -38,7 +38,7 @@ export default function AssistantManagerPortal({ user, onLogout }) {
 
   // المعاون يهتم بالـ pending_assistant + ما سبقها وما بعدها
   const pendingMyReview = requests.filter((r) => r.status === 'pending_assistant')
-  const inProcess = requests.filter((r) => ['pending_dept_review', 'proofreading', 'pending_dept_send'].includes(r.status))
+  const inProcess = requests.filter((r) => ['pending_dept_review', 'proofreading', 'pending_dept_send', 'pending_manager_send'].includes(r.status))
   const completedByMe = requests.filter((r) => r.assistant_review_by === user?.id)
 
   const navItems = [
@@ -151,6 +151,7 @@ function ReviewModal({ request, onClose, onChanged }) {
   const [loading, setLoading] = useState(false)
   const [decision, setDecision] = useState('approve')
   const [notes, setNotes] = useState('')
+  const [confidentiality, setConfidentiality] = useState('public')
   const [busy, setBusy] = useState(false)
   const toast = useToast()
 
@@ -159,7 +160,15 @@ function ReviewModal({ request, onClose, onChanged }) {
     setLoading(true)
     setDecision('approve')
     setNotes('')
-    api.getRequest(request.id).then((r) => { if (r.success) setDetail(r.data) }).catch(() => {}).finally(() => setLoading(false))
+    api.getRequest(request.id)
+      .then((r) => {
+        if (r.success) {
+          setDetail(r.data)
+          // نبدأ من تصنيف الجهة الطالبة، ويستطيع المعاون تعديله
+          setConfidentiality(r.data.confidentiality || 'public')
+        }
+      })
+      .catch(() => {}).finally(() => setLoading(false))
   }, [request])
 
   if (!request) return null
@@ -168,7 +177,7 @@ function ReviewModal({ request, onClose, onChanged }) {
   const submit = async () => {
     setBusy(true)
     try {
-      await api.assistantFinalReview(d.id, decision, notes)
+      await api.assistantFinalReview(d.id, decision, notes, decision === 'approve' ? confidentiality : undefined)
       toast.success('تم تسجيل قرارك')
       onChanged()
     } catch (e) { toast.error(e.message) }
@@ -188,10 +197,12 @@ function ReviewModal({ request, onClose, onChanged }) {
           </div>
 
           <div className="grid grid-cols-2 gap-4 p-4 bg-[var(--color-surface-soft)] rounded-xl">
-            <Field label="النائب" value={d.deputy_name} />
+            <Field label="الجهة الطالبة" value={d.deputy_name} />
+            <Field label="نوع الجهة" value={REQUESTER_TYPES[d.requester_type] || 'نائب'} />
             <Field label="اللجنة" value={d.committee} />
             <Field label="الغرض" value={PURPOSE_LABELS[d.purpose] || '—'} />
             <Field label="القسم" value={d.assigned_department} />
+            <Field label="تصنيف الجهة الطالبة" value={CONFIDENTIALITY_LABELS[d.confidentiality] || 'عام'} />
             <Field label="تاريخ التقديم" value={formatDate(d.date_received)} />
             <Field label="موافقة على النشر" value={d.can_share ? '✓ نعم' : '✗ لا'} />
           </div>
@@ -215,6 +226,46 @@ function ReviewModal({ request, onClose, onChanged }) {
                   </div>
                 </label>
               </div>
+
+              {/* تحديد مسار التسليم عند الاعتماد */}
+              {decision === 'approve' && (
+                <div className="mb-3 p-3 rounded-lg bg-white border border-[var(--color-border)]">
+                  <label className="label label-required mb-1">تصنيف البحث ومسار التسليم</label>
+                  <p className="form-hint mb-2">
+                    البحث العام يُرسل إلى رئيس القسم ليسلّمه للنائب، وذو الخصوصية يُرسل إلى مدير الدائرة.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    {Object.entries(CONFIDENTIALITY_LABELS).map(([value, label]) => {
+                      const checked = confidentiality === value
+                      const danger = value === 'confidential'
+                      return (
+                        <label key={value} className={`flex-1 cursor-pointer p-2.5 rounded-lg border-2 transition ${
+                          checked
+                            ? danger
+                              ? 'border-[var(--color-danger-600)] bg-[var(--color-danger-50)]'
+                              : 'border-[var(--color-success-600)] bg-[var(--color-success-50)]'
+                            : 'border-[var(--color-border)] hover:bg-[var(--color-surface-soft)]'
+                        }`}>
+                          <input
+                            type="radio" name="conf" value={value} checked={checked}
+                            onChange={(e) => setConfidentiality(e.target.value)} className="sr-only"
+                          />
+                          <span className="font-semibold text-sm block">{label}</span>
+                          <span className="text-[10px] text-[var(--color-navy-500)]">
+                            {danger ? '← مدير الدائرة' : '← رئيس القسم'}
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  {d.confidentiality && confidentiality !== d.confidentiality && (
+                    <p className="text-[11px] font-semibold text-[var(--color-warning-700)] mt-2">
+                      ⚠️ ستغيّر تصنيف الجهة الطالبة من «{CONFIDENTIALITY_LABELS[d.confidentiality]}» إلى «{CONFIDENTIALITY_LABELS[confidentiality]}»
+                    </p>
+                  )}
+                </div>
+              )}
+
               <textarea className="textarea mb-3" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="ملاحظات (مهم في حال الرفض)" />
               <button onClick={submit} disabled={busy} className={decision === 'approve' ? 'btn-success w-full' : 'btn-danger w-full'}>
                 {busy ? 'جاري...' : 'تأكيد القرار'}

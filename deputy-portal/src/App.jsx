@@ -7,10 +7,15 @@ import ProofreaderPortal from './ProofreaderPortal'
 import AssistantManagerPortal from './AssistantManagerPortal'
 import SuperAdminPortal from './SuperAdminPortal'
 import { login as apiLogin, logout as apiLogout, setToken } from './api'
-import Brand from './components/layout/Brand'
 import Spinner from './components/ui/Spinner'
 import { ToastProvider, useToast } from './components/ui/Toast'
-import { IconMail, IconLock, IconUser, IconChevronDown } from './components/icons/Icons'
+import { IconMail, IconLock, IconEye, IconEyeOff } from './components/icons/Icons'
+import StateEmblem from './components/national/StateEmblem'
+import CouncilLogo from './components/national/CouncilLogo'
+import IraqFlag, { FlagStripe } from './components/national/IraqFlag'
+import IslamicPattern from './components/national/IslamicPattern'
+import BaghdadSkyline from './components/national/BaghdadSkyline'
+import { REQUESTER_TYPES } from './lib/format'
 
 const ROLE_TO_PORTAL = {
   deputy: 'deputy',
@@ -22,37 +27,22 @@ const ROLE_TO_PORTAL = {
   admin: 'admin',
 }
 
-const PORTALS_META = [
-  { id: 'deputy', name: 'بوابة السادة النواب', tone: 'gold' },
-  { id: 'manager', name: 'بوابة مدير الدائرة', tone: 'navy' },
-  { id: 'department', name: 'بوابة رئيس القسم', tone: 'gold' },
-  { id: 'researcher', name: 'بوابة الباحث', tone: 'navy' },
-  { id: 'proofreader', name: 'بوابة المدقق اللغوي', tone: 'gold' },
-  { id: 'assistant', name: 'بوابة المعاون', tone: 'navy' },
-  { id: 'admin', name: 'لوحة إدارة النظام', tone: 'navy' },
-]
-
-const DEMO_ACCOUNTS = [
-  { email: 'khaled@parliament.iq', portal: 'deputy', name: 'د. خالد العبيدي' },
-  { email: 'sara@parliament.iq', portal: 'deputy', name: 'أ. سارة عبدالرحمن' },
-  { email: 'manager@parliament.iq', portal: 'manager', name: 'مدير الدائرة' },
-  { email: 'suad@parliament.iq', portal: 'department', name: 'د. سعاد العلوي - قسم البحوث' },
-  { email: 'hassan@parliament.iq', portal: 'department', name: 'أ. حسن الربيعي - بحوث الموازنة' },
-  { email: 'ali.m@parliament.iq', portal: 'department', name: 'أ. علي الموسوي - الدراسات القانونية' },
-  { email: 'nour@parliament.iq', portal: 'researcher', name: 'د. نور الدين' },
-  { email: 'rana@parliament.iq', portal: 'researcher', name: 'أ. رنا علي' },
-  { email: 'mohammed.k@parliament.iq', portal: 'proofreader', name: 'أ. محمد الخطاط' },
-  { email: 'huda@parliament.iq', portal: 'proofreader', name: 'أ. هدى السامرائي' },
-  { email: 'assistant@parliament.iq', portal: 'assistant', name: 'د. عبدالكريم الأنصاري' },
-  { email: 'admin@parliament.iq', portal: 'admin', name: 'مدير النظام' },
+// مسار الخدمة البحثية كما يراه المستفيد — مطابق للـ workflow المعتمد
+const SERVICE_JOURNEY = [
+  { step: 'تقديم الطلب', actor: 'الجهة الطالبة' },
+  { step: 'الإحالة إلى القسم', actor: 'مدير الدائرة' },
+  { step: 'إعداد البحث', actor: 'الباحث' },
+  { step: 'التدقيق اللغوي', actor: 'المدقق اللغوي' },
+  { step: 'التدقيق النهائي', actor: 'المعاون' },
+  { step: 'تسليم البحث', actor: 'رئيس القسم أو مدير الدائرة' },
 ]
 
 function LoginPage({ onSuccess }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [expandedPortal, setExpandedPortal] = useState(null)
   const toast = useToast()
 
   const handleLogin = async (e) => {
@@ -77,73 +67,117 @@ function LoginPage({ onSuccess }) {
     }
   }
 
-  const fillCred = (acc) => {
-    setEmail(acc.email)
-    setPassword('123456')
-    setError('')
-    setExpandedPortal(null)
-  }
-
   return (
-    <div className="min-h-screen login-bg flex items-center justify-center p-3 sm:p-4" dir="rtl">
-      <div className="w-full max-w-6xl">
-        {/* Header */}
-        <div className="text-center mb-6 sm:mb-8">
-          <div className="inline-flex items-center justify-center mb-3 sm:mb-4">
-            <Brand size={64} />
-          </div>
-          <h1 className="text-2xl sm:text-4xl font-bold text-white mb-2 tracking-tight">مجلس النواب العراقي</h1>
-          <div className="flex items-center justify-center gap-2">
-            <span className="h-px w-8 sm:w-12 bg-[var(--color-gold-500)]" />
-            <p className="text-sm sm:text-base font-semibold text-[var(--color-gold-300)]">دائرة البحوث والدراسات</p>
-            <span className="h-px w-8 sm:w-12 bg-[var(--color-gold-500)]" />
-          </div>
-          <p className="text-xs sm:text-sm text-[var(--color-navy-200)] mt-2 sm:mt-3">منصة إدارة البحوث البرلمانية</p>
-        </div>
+    <div className="relative min-h-screen login-bg flex items-center justify-center p-3 sm:p-4 overflow-hidden" dir="rtl">
+      {/* ===== طبقات الخلفية الوطنية ===== */}
+      <IslamicPattern className="absolute inset-0" opacity={0.06} />
+      <BaghdadSkyline
+        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-full min-w-[1000px]"
+        color="#0F3157"
+      />
+      {/* تعتيم متدرج يحافظ على وضوح المحتوى فوق الرسم */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{ background: 'radial-gradient(ellipse 70% 55% at 50% 45%, rgba(5,22,40,0.72), transparent 100%)' }}
+      />
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6">
-          {/* Login form */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
-              <div className="iraqi-accent" />
-              <div className="p-8">
-                <h2 className="text-xl font-bold text-[var(--color-navy-900)] mb-1">تسجيل الدخول</h2>
-                <p className="text-sm text-[var(--color-navy-500)] mb-6">ادخل بياناتك للوصول إلى المنصة</p>
+      {/* شريط العلم العراقي أعلى الصفحة */}
+      <FlagStripe className="absolute top-0 inset-x-0 z-10" height={5} />
+
+      <div className="relative z-10 w-full max-w-5xl py-8 sm:py-10">
+        {/* ===== الترويسة الرسمية ===== */}
+        <header className="text-center mb-8 sm:mb-10">
+          <div className="flex items-center justify-center gap-2.5 mb-3">
+            <StateEmblem size={40} className="sm:!w-12 sm:!h-12" />
+            <p className="text-[10px] sm:text-xs font-bold tracking-[0.3em] text-[var(--color-gold-400)]">
+              جمهورية العراق
+            </p>
+          </div>
+
+          <h1 className="text-2xl sm:text-4xl font-bold text-white tracking-tight">مجلس النواب العراقي</h1>
+
+          <div className="flex items-center justify-center gap-2 sm:gap-3 mt-2">
+            <span aria-hidden="true" className="h-px w-10 sm:w-20 bg-gradient-to-l from-[var(--color-gold-500)] to-transparent" />
+            <p className="text-sm sm:text-base font-semibold text-[var(--color-gold-300)]">دائرة البحوث والدراسات</p>
+            <span aria-hidden="true" className="h-px w-10 sm:w-20 bg-gradient-to-r from-[var(--color-gold-500)] to-transparent" />
+          </div>
+
+          <p className="text-xs sm:text-sm text-[var(--color-navy-200)] mt-2">منصة إدارة البحوث البرلمانية</p>
+        </header>
+
+        {/* ===== عمودان: بطاقة الدخول + التعريف بالخدمة ===== */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-8 items-start">
+
+          {/* --- بطاقة تسجيل الدخول (الإجراء الرئيسي) --- */}
+          <div className="lg:col-span-5 lg:order-2">
+            <div className="relative bg-white rounded-2xl shadow-2xl overflow-hidden">
+              <FlagStripe height={5} />
+              <img
+                src="/national/emblem-iraq.svg"
+                alt=""
+                aria-hidden="true"
+                className="pointer-events-none absolute -left-8 -bottom-8 w-36 opacity-[0.035] select-none"
+                draggable="false"
+              />
+              <div className="relative p-6 sm:p-8">
+                <div className="flex items-center gap-3 mb-6">
+                  <StateEmblem size={40} />
+                  <div>
+                    <h2 className="text-xl font-bold text-[var(--color-navy-900)] leading-tight">تسجيل الدخول</h2>
+                    <p className="text-sm text-[var(--color-navy-500)]">للمستخدمين المخوَّلين حصراً</p>
+                  </div>
+                </div>
 
                 <form onSubmit={handleLogin} className="space-y-4">
                   <div>
-                    <label className="label label-required">البريد الإلكتروني</label>
+                    <label htmlFor="login-email" className="label label-required">البريد الإلكتروني</label>
                     <div className="relative">
-                      <IconMail className="w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-navy-400)]" />
+                      <IconMail aria-hidden="true" className="w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-navy-400)]" />
                       <input
+                        id="login-email"
                         type="email" dir="ltr"
                         value={email}
                         onChange={(e) => { setEmail(e.target.value); setError('') }}
                         className="input input-with-icon text-right"
                         placeholder="example@parliament.iq"
+                        autoComplete="username"
                         required
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="label label-required">كلمة المرور</label>
+                    <label htmlFor="login-password" className="label label-required">كلمة المرور</label>
                     <div className="relative">
-                      <IconLock className="w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-navy-400)]" />
+                      <IconLock aria-hidden="true" className="w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-navy-400)]" />
                       <input
-                        type="password"
+                        id="login-password"
+                        type={showPassword ? 'text' : 'password'}
                         value={password}
                         onChange={(e) => { setPassword(e.target.value); setError('') }}
-                        className="input input-with-icon"
+                        className="input input-with-icon pl-11"
                         placeholder="••••••••"
+                        autoComplete="current-password"
                         required
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((s) => !s)}
+                        className="absolute left-1.5 top-1/2 -translate-y-1/2 w-11 h-11 flex items-center justify-center rounded-lg text-[var(--color-navy-500)] hover:bg-[var(--color-surface-soft)] hover:text-[var(--color-navy-900)] transition-colors"
+                        aria-label={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                        aria-pressed={showPassword}
+                      >
+                        {showPassword
+                          ? <IconEyeOff aria-hidden="true" className="w-5 h-5" />
+                          : <IconEye aria-hidden="true" className="w-5 h-5" />}
+                      </button>
                     </div>
                   </div>
 
                   {error && (
-                    <div className="flex items-start gap-2 px-4 py-3 bg-[var(--color-danger-50)] border border-red-200 rounded-lg">
-                      <svg className="w-5 h-5 text-[var(--color-danger-600)] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div role="alert" className="flex items-start gap-2 px-4 py-3 bg-[var(--color-danger-50)] border border-red-200 rounded-lg">
+                      <svg aria-hidden="true" className="w-5 h-5 text-[var(--color-danger-600)] flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                       <p className="text-sm text-[var(--color-danger-700)]">{error}</p>
@@ -151,102 +185,74 @@ function LoginPage({ onSuccess }) {
                   )}
 
                   <button type="submit" disabled={busy} className="btn-gold w-full btn-lg justify-center">
-                    {busy ? <Spinner size="sm" /> : 'تسجيل الدخول'}
+                    {busy ? <><Spinner size="sm" /><span>جاري التحقق...</span></> : 'تسجيل الدخول'}
                   </button>
                 </form>
 
-                <div className="mt-6 pt-5 border-t border-[var(--color-border)]">
+                <div className="mt-6 pt-5 border-t border-[var(--color-border)] space-y-1.5">
                   <p className="text-xs text-center text-[var(--color-navy-500)]">
-                    للدعم الفني: <span className="font-mono" dir="ltr">support@parliament.iq</span>
+                    للدعم الفني: <a href="mailto:support@parliament.iq" className="touch-link font-mono text-[var(--color-navy-700)] hover:text-[var(--color-gold-700)] underline" dir="ltr">support@parliament.iq</a>
+                  </p>
+                  <p className="text-[11px] text-center text-[var(--color-navy-400)]">
+                    تُسجَّل جميع عمليات الدخول لأغراض التدقيق الأمني
                   </p>
                 </div>
               </div>
             </div>
-
-            {/* Workflow */}
-            <div className="mt-4 p-4 rounded-xl bg-white/5 backdrop-blur border border-white/10">
-              <p className="text-xs font-semibold text-[var(--color-gold-300)] mb-3 text-center">مسار الطلب البحثي</p>
-              <div className="flex items-center justify-between gap-1">
-                {['النائب', 'المدير', 'القسم', 'الباحث', 'المدقق'].map((step, i) => (
-                  <div key={step} className="flex-1 flex flex-col items-center text-center">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-b from-[var(--color-gold-400)] to-[var(--color-gold-600)] flex items-center justify-center text-[var(--color-navy-950)] font-bold text-xs">
-                      {i + 1}
-                    </div>
-                    <span className="text-[10px] text-[var(--color-navy-200)] mt-1">{step}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
 
-          {/* Demo accounts */}
-          <div className="lg:col-span-3">
-            <div className="bg-white/8 backdrop-blur-xl rounded-2xl border border-white/10 overflow-hidden">
-              <div className="px-6 py-4 border-b border-white/10 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-lg bg-[var(--color-gold-500)]/20 text-[var(--color-gold-300)] flex items-center justify-center">
-                  <IconUser className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">حسابات تجريبية</h3>
-                  <p className="text-xs text-[var(--color-navy-300)]">اضغط على بوابة ثم اختر مستخدماً للدخول السريع (كلمة المرور: 123456)</p>
-                </div>
-              </div>
-              <div className="p-3 max-h-[480px] overflow-y-auto space-y-1.5">
-                {PORTALS_META.map((portal) => {
-                  const accounts = DEMO_ACCOUNTS.filter((a) => a.portal === portal.id)
-                  const expanded = expandedPortal === portal.id
-                  return (
-                    <div key={portal.id} className="rounded-xl overflow-hidden">
-                      <button
-                        onClick={() => setExpandedPortal(expanded ? null : portal.id)}
-                        className={`w-full flex items-center gap-3 px-4 py-3 transition-all ${
-                          expanded ? 'bg-white/15' : 'hover:bg-white/10'
-                        }`}
-                      >
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                          portal.tone === 'gold'
-                            ? 'bg-gradient-to-br from-[var(--color-gold-400)] to-[var(--color-gold-700)]'
-                            : 'bg-gradient-to-br from-[var(--color-navy-400)] to-[var(--color-navy-700)]'
-                        }`}>
-                          <IconUser className="w-5 h-5 text-white" />
-                        </div>
-                        <div className="flex-1 text-right">
-                          <p className="text-white font-semibold text-sm">{portal.name}</p>
-                          <p className="text-[var(--color-navy-300)] text-[11px]">{accounts.length} {accounts.length === 1 ? 'حساب' : 'حسابات'}</p>
-                        </div>
-                        <IconChevronDown className={`w-4 h-4 text-[var(--color-navy-300)] transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                      </button>
-                      {expanded && (
-                        <div className="bg-black/10 mr-12 mb-1 rounded-lg overflow-hidden animate-fade-in">
-                          {accounts.map((acc) => (
-                            <button
-                              key={acc.email}
-                              onClick={() => fillCred(acc)}
-                              className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/10 transition-colors text-right border-b border-white/5 last:border-0"
-                            >
-                              <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white text-xs font-bold">
-                                {acc.name[0]}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-white text-sm font-medium truncate">{acc.name}</p>
-                                <p className="text-[var(--color-navy-300)] text-[11px] font-mono truncate" dir="ltr">{acc.email}</p>
-                              </div>
-                              <span className="text-[var(--color-gold-300)] text-xs font-semibold">دخول سريع ←</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+          {/* --- التعريف بالخدمة --- */}
+          <div className="lg:col-span-7 lg:order-1 space-y-5">
+            {/* شعار المجلس بين علمين */}
+            <div className="flex items-center justify-center gap-6 sm:gap-10">
+              <IraqFlag width={54} className="hidden sm:block" wave />
+              <CouncilLogo size={112} className="sm:!w-32 sm:!h-32" glow />
+              <IraqFlag width={54} className="hidden sm:block" wave />
             </div>
+
+            {/* مسار الخدمة البحثية */}
+            <section className="p-5 rounded-2xl bg-white/[0.06] backdrop-blur border border-white/10">
+              <h2 className="text-sm font-bold text-[var(--color-gold-300)] mb-4">مسار الخدمة البحثية</h2>
+              <ol className="space-y-2.5">
+                {SERVICE_JOURNEY.map((s, i) => (
+                  <li key={s.step} className="flex items-center gap-3">
+                    <span
+                      aria-hidden="true"
+                      className="w-7 h-7 flex-shrink-0 rounded-full bg-gradient-to-b from-[var(--color-gold-400)] to-[var(--color-gold-600)] flex items-center justify-center text-[var(--color-navy-950)] font-bold text-xs"
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="text-sm text-white font-medium">{s.step}</span>
+                    <span aria-hidden="true" className="flex-1 h-px bg-white/10" />
+                    <span className="text-[11px] text-[var(--color-navy-300)]">{s.actor}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+
+            {/* الجهات المستفيدة */}
+            <section className="p-5 rounded-2xl bg-white/[0.06] backdrop-blur border border-white/10">
+              <h2 className="text-sm font-bold text-[var(--color-gold-300)] mb-3">الجهات المستفيدة من الخدمة</h2>
+              <ul className="flex flex-wrap gap-2">
+                {Object.entries(REQUESTER_TYPES).map(([key, label]) => (
+                  <li
+                    key={key}
+                    className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 text-xs font-medium text-white"
+                  >
+                    {label}
+                  </li>
+                ))}
+              </ul>
+            </section>
           </div>
         </div>
 
-        <p className="text-center text-xs text-[var(--color-navy-300)] mt-8">
-          © {new Date().getFullYear()} مجلس النواب العراقي — جميع الحقوق محفوظة
-        </p>
+        <footer className="flex flex-col items-center gap-2 mt-10">
+          <IraqFlag width={40} />
+          <p className="text-center text-xs text-[var(--color-navy-300)]">
+            © {new Date().getFullYear()} جمهورية العراق — مجلس النواب العراقي — جميع الحقوق محفوظة
+          </p>
+        </footer>
       </div>
     </div>
   )

@@ -61,14 +61,21 @@ export default function Topbar({ title, subtitle, actions, onChangePassword, onM
         {actions}
 
         {onChangePassword && (
-          <button onClick={onChangePassword} className="btn-icon" title="تغيير كلمة المرور">
-            <IconLock className="w-5 h-5" />
+          <button onClick={onChangePassword} className="btn-icon" title="تغيير كلمة المرور" aria-label="تغيير كلمة المرور">
+            <IconLock className="w-5 h-5" aria-hidden="true" />
           </button>
         )}
 
         <div className="relative" ref={ref}>
-          <button onClick={() => setOpen((o) => !o)} className="btn-icon relative" title="الإشعارات">
-            <IconBell className="w-5 h-5" />
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="btn-icon relative"
+            title="الإشعارات"
+            aria-label={unread > 0 ? `الإشعارات، ${unread} غير مقروء` : 'الإشعارات'}
+            aria-expanded={open}
+            aria-haspopup="true"
+          >
+            <IconBell className="w-5 h-5" aria-hidden="true" />
             {unread > 0 && (
               <span className="absolute top-1 right-1 w-4 h-4 bg-[var(--color-danger-600)] text-white text-[10px] font-bold rounded-full flex items-center justify-center">
                 {unread > 9 ? '9+' : unread}

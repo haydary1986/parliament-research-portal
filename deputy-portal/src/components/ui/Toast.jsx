@@ -45,9 +45,17 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="fixed bottom-6 left-6 z-[100] flex flex-col gap-2 pointer-events-none">
+      {/* aria-live يُعلن الرسائل لقارئات الشاشة دون سرقة التركيز.
+          الأخطاء assertive لأنها تتطلب انتباهاً فورياً. */}
+      <div
+        className="fixed bottom-6 left-6 z-[100] flex flex-col gap-2 pointer-events-none"
+        role="status"
+        aria-live="polite"
+        aria-atomic="false"
+      >
         {toasts.map((t) => (
           <div key={t.id}
+            role={t.type === 'error' ? 'alert' : undefined}
             className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg min-w-[280px] max-w-md animate-slide-up ${STYLES[t.type]}`}>
             {ICONS[t.type]}
             <p className="text-sm font-medium flex-1">{t.message}</p>

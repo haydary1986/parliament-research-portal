@@ -561,7 +561,7 @@ html, body {
 /* ---------- Status pills ---------- */
 .status-pending, .status-assigned, .status-confirmed, .status-in_progress,
 .status-review, .status-pending_dept_review, .status-proofreading,
-.status-pending_assistant, .status-pending_dept_send,
+.status-pending_assistant, .status-pending_dept_send, .status-pending_manager_send,
 .status-under_manager_review,
 .status-delivered, .status-completed, .status-returned_exists, .status-rejected,
 .status-sent_to_proofreader, .status-submitted, .status-returned,
@@ -580,6 +580,7 @@ html, body {
 .status-proofreading { background: #FDF2F8; color: #BE185D; border-color: #FBCFE8; }
 .status-pending_assistant { background: #FEF3C7; color: #92400E; border-color: #FCD34D; }
 .status-pending_dept_send { background: #DBEAFE; color: #1E40AF; border-color: #93C5FD; }
+.status-pending_manager_send { background: #EDE9FE; color: #5B21B6; border-color: #C4B5FD; }
 .status-under_manager_review { background: #ECFEFF; color: #155E75; border-color: #A5F3FC; }
 .status-delivered { background: #F0FDFA; color: #115E59; border-color: #99F6E4; }
 .status-completed, .status-received { background: #ECFDF5; color: #047857; border-color: #A7F3D0; }
@@ -620,6 +621,69 @@ html, body {
     radial-gradient(ellipse at top right, rgba(184, 134, 11, 0.12), transparent 50%),
     radial-gradient(ellipse at bottom left, rgba(10, 37, 64, 0.95), rgba(5, 22, 40, 1)),
     linear-gradient(135deg, #0A2540 0%, #051628 100%);
+}
+
+/* ---------- رفرفة خفيفة للعلم ---------- */
+@keyframes flagWave {
+  0%, 100% { transform: perspective(300px) rotateY(0deg) skewY(0deg); }
+  50%      { transform: perspective(300px) rotateY(-9deg) skewY(-1.2deg); }
+}
+.flag-wave {
+  animation: flagWave 5s ease-in-out infinite;
+  transform-origin: right center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flag-wave { animation: none; }
+}
+
+/* ===========================================
+   إمكانية الوصول (WCAG) — نمط "Accessible & Ethical"
+   المعتمد للجهات الحكومية: تباين عالٍ، تركيز واضح،
+   أهداف لمس 44px، واحترام تقليل الحركة.
+   =========================================== */
+
+/* ---------- حلقة تركيز واضحة لمستخدمي لوحة المفاتيح ---------- */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-gold-600);
+  outline-offset: 2px;
+}
+
+/* بطاقات الاختيار تخفي زر الراديو/الصندوق داخلها (sr-only)،
+   فنُظهر التركيز على البطاقة نفسها وإلا اختفى مؤشر لوحة المفاتيح */
+label:focus-within {
+  outline: 3px solid var(--color-gold-600);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* ---------- أهداف اللمس: 44px ----------
+   نعتمد على الشاشة الصغيرة إضافةً إلى pointer: coarse، لأن كشف نوع
+   المؤشر غير موثوق في بعض المتصفحات وبيئات الاختبار. */
+@media (pointer: coarse), (max-width: 767px) {
+  .btn, .btn-primary, .btn-gold, .btn-outline, .btn-ghost,
+  .btn-danger, .btn-success, .btn-icon, .hamburger {
+    min-height: 2.75rem;
+  }
+  .btn-sm { min-height: 2.5rem; }
+  .input, .select, .textarea { min-height: 2.75rem; }
+  /* الروابط النصية داخل الفقرات تحتاج مساحة لمس مريحة */
+  .touch-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+    padding-inline: 0.25rem;
+  }
+}
+
+/* ---------- تقليل الحركة ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Scrollbar */

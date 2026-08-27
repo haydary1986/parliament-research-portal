@@ -64,12 +64,19 @@ export function createRequest(data) {
   return request('POST', '/requests', data);
 }
 
-export function assignRequest(id, departmentIds) {
+// تعديل بيانات الطلب (مدير الدائرة)
+export function updateRequest(id, data) {
+  return request('PUT', `/requests/${id}`, data);
+}
+
+// إحالة الطلب لقسم أو أكثر، مع إمكانية تعيين الباحث/الباحثين مباشرةً.
+// extra: { researcher_ids, service_type, classification, completion_days }
+export function assignRequest(id, departmentIds, extra = {}) {
   // يقبل مصفوفة أو string واحد (متوافق مع القديم)
   const payload = Array.isArray(departmentIds)
     ? { department_ids: departmentIds }
     : { department_id: departmentIds };
-  return request('PUT', `/requests/${id}/assign`, payload);
+  return request('PUT', `/requests/${id}/assign`, { ...payload, ...extra });
 }
 
 export function confirmRequest(id, data) {
@@ -204,14 +211,29 @@ export function referToAssistant(taskId) {
   return request('PUT', `/research-tasks/${taskId}/refer-assistant`);
 }
 
-// المعاون يدقق نهائياً
-export function assistantFinalReview(id, decision, notes = '') {
-  return request('PUT', `/requests/${id}/assistant-review`, { decision, notes });
+// المعاون يدقق نهائياً — ويستطيع تصحيح تصنيف السرية قبل التوجيه
+export function assistantFinalReview(id, decision, notes = '', confidentiality) {
+  const payload = { decision, notes };
+  if (confidentiality) payload.confidentiality = confidentiality;
+  return request('PUT', `/requests/${id}/assistant-review`, payload);
 }
 
-// رئيس القسم يرسل البحث للنائب
+// رئيس القسم يرسل البحث العام للنائب
 export function deptSendToDeputy(id) {
   return request('PUT', `/requests/${id}/dept-send`);
+}
+
+// مدير الدائرة يرسل البحث ذا الخصوصية للنائب
+export function managerSendToDeputy(id) {
+  return request('PUT', `/requests/${id}/manager-send`);
+}
+
+// إعادة إسناد مهمة بحث لباحث بديل (رئيس القسم أو مدير الدائرة)
+export function reassignResearchTask(taskId, researcherId, notes = '') {
+  return request('PUT', `/research-tasks/${taskId}/reassign`, {
+    researcher_id: researcherId,
+    notes,
+  });
 }
 
 // ========== Logout ==========
