@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import FileDownload from './components/ui/FileDownload'
 import PortalLayout from './components/layout/PortalLayout'
 import StatusBadge from './components/ui/StatusBadge'
 import StatCard from './components/ui/StatCard'
@@ -178,15 +179,13 @@ function TaskModal({ task, onClose, onChanged }) {
         {task.research_file ? (
           <div className="card p-4">
             <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-800)]">المستند المطلوب تدقيقه</h4>
-            <a
-              href={api.getFileUrl(task.research_file)}
-              target="_blank"
-              rel="noreferrer"
+            <FileDownload
+              filename={task.research_file}
               className="btn-primary w-full justify-center"
             >
               <IconDocument className="w-4 h-4" aria-hidden="true" />
               <span>فتح ملف البحث</span>
-            </a>
+            </FileDownload>
           </div>
         ) : (
           <div className="card p-4 bg-[var(--color-warning-50)] border-[var(--color-warning-600)]">

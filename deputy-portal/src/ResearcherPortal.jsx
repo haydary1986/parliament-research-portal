@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import FileDownload from './components/ui/FileDownload'
 import PortalLayout from './components/layout/PortalLayout'
 import StatusBadge from './components/ui/StatusBadge'
 import StatCard from './components/ui/StatCard'
@@ -113,6 +114,7 @@ export default function ResearcherPortal({ user, onLogout }) {
         task={active}
         onClose={() => setActive(null)}
         onChanged={() => { setActive(null); refresh() }}
+        onRefresh={refresh}
       />
     </PortalLayout>
   )
@@ -150,7 +152,7 @@ function TasksTable({ rows, onOpen }) {
   )
 }
 
-function TaskDetailModal({ task, onClose, onChanged }) {
+function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -174,6 +176,28 @@ function TaskDetailModal({ task, onClose, onChanged }) {
   if (!task) return null
   const t = detail || task
 
+  // تحديث في مكانه: يُبقي النافذة مفتوحة ويحدّث القائمة خلفها.
+  // كان رفع الملف يُغلق النافذة فينقطع مسار الباحث ويضطر لإعادة فتحها.
+  const reloadInPlace = async () => {
+    try {
+      const r = await api.getResearchTask(t.id)
+      if (r.success) setDetail(r.data)
+    } catch { /* الفشل غير حرج — القائمة تُحدَّث على أي حال */ }
+    onRefresh?.()
+  }
+
+  // تغييرات الحالة التي تُبقي المهمة عند الباحث: نبقى في النافذة
+  const updateStatusInPlace = async (status) => {
+    setBusy(true)
+    try {
+      await api.updateResearchTaskStatus(t.id, status)
+      toast.success('تم التحديث')
+      await reloadInPlace()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
+  // تغييرات تُخرج المهمة من قائمة الباحث: نغلق النافذة
   const updateStatus = async (status) => {
     setBusy(true)
     try {
@@ -242,7 +266,7 @@ function TaskDetailModal({ task, onClose, onChanged }) {
           {t.status === 'assigned' && (
             <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
               <p className="text-sm mb-3">عند البدء بالعمل، حدِّث حالة المهمة:</p>
-              <button onClick={() => updateStatus('in_progress')} disabled={busy} className="btn-primary w-full">
+              <button onClick={() => updateStatusInPlace('in_progress')} disabled={busy} className="btn-primary w-full">
                 {busy ? 'جاري...' : 'بدء العمل على البحث'}
               </button>
             </div>
@@ -250,7 +274,7 @@ function TaskDetailModal({ task, onClose, onChanged }) {
 
           {t.status === 'in_progress' && (
             <div className="card p-4 bg-[var(--color-navy-50)] border-[var(--color-navy-200)] space-y-3">
-              <ResearchFileUpload task={t} onChanged={onChanged} />
+              <ResearchFileUpload task={t} onUploaded={reloadInPlace} />
               <div className="flex gap-3">
                 <button
                   onClick={() => {
@@ -404,7 +428,7 @@ function TaskDetailModal({ task, onClose, onChanged }) {
   )
 }
 
-function ResearchFileUpload({ task, onChanged }) {
+function ResearchFileUpload({ task, onUploaded }) {
   const [uploading, setUploading] = useState(false)
   const toast = useToast()
 
@@ -420,7 +444,7 @@ function ResearchFileUpload({ task, onChanged }) {
       if (up.success && up.data?.filename) {
         await api.attachResearchFile(task.id, up.data.filename)
         toast.success('تم رفع الملف بنجاح')
-        onChanged?.()
+        await onUploaded?.()
       } else {
         toast.error(up.message || 'فشل رفع الملف')
       }
@@ -436,13 +460,12 @@ function ResearchFileUpload({ task, onChanged }) {
           <div className="flex-1 min-w-0">
             <p className="text-xs text-[var(--color-navy-500)] font-semibold">ملف البحث</p>
             {task.file_path ? (
-              <a
-                href={api.getFileUrl(task.file_path)}
-                target="_blank" rel="noreferrer"
-                className="text-sm font-mono text-[var(--color-navy-900)] hover:text-[var(--color-gold-700)] truncate block"
+              <FileDownload
+                filename={task.file_path}
+                className="text-sm font-mono text-[var(--color-navy-900)] hover:text-[var(--color-gold-700)] truncate block text-right"
               >
                 {task.file_path}
-              </a>
+              </FileDownload>
             ) : (
               <p className="text-sm text-[var(--color-navy-400)]">لم يُرفَع ملف بعد</p>
             )}

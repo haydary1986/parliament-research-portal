@@ -1,5 +1,5 @@
 import { formatDate } from '../../lib/format'
-import * as api from '../../api'
+import FileDownload from './FileDownload'
 import { IconDocument } from '../icons/Icons'
 
 /**
@@ -41,14 +41,10 @@ export default function ResearchFiles({ files, title = 'ملف البحث', empt
                 {f.submitted_date && ` • سُلِّم ${formatDate(f.submitted_date)}`}
               </p>
             </div>
-            <a
-              href={api.getFileUrl(f.file_path)}
-              target="_blank"
-              rel="noreferrer"
+            <FileDownload
+              filename={f.file_path}
               className="btn-outline btn-sm flex-shrink-0"
-            >
-              تنزيل
-            </a>
+            />
           </li>
         ))}
       </ul>

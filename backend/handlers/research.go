@@ -849,6 +849,19 @@ func deliverToDeputy(w http.ResponseWriter, r *http.Request, id string, userID i
 				"مجلس النواب العراقي — دائرة البحوث والدراسات النيابية: اكتملت الخدمة البحثية لطلبكم %s وتم تسليمها عبر المنصة.", id))
 		}
 
+		// إنهاء مهام الباحثين: البحث سُلِّم فلم يعد عليهم عمل.
+		// كان النظام يُشعر الباحث بالموافقة على الأرشفة بينما تبقى المهمة
+		// في حالة submitted، وقائمة «موافقة الأرشفة» تُرشِّح على completed —
+		// فلا تظهر المهمة أبداً وتتعطّل خطوة الأرشفة كلياً.
+		if _, err := tx.Exec(
+			`UPDATE research_tasks
+			 SET status = 'completed',
+			     submitted_date = COALESCE(submitted_date, ?),
+			     updated_at = ?
+			 WHERE request_id = ? AND status != 'completed'`, now, now, id); err != nil {
+			return fmt.Errorf("إنهاء مهام الباحثين: %w", err)
+		}
+
 		// إشعار الباحث(ين) لأخذ موافقتهم على الأرشفة
 		researcherRows, _ := tx.Query("SELECT DISTINCT id, researcher_id FROM research_tasks WHERE request_id = ?", id)
 		if researcherRows != nil {

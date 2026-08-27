@@ -318,6 +318,42 @@ export function getFileUrl(filename) {
   return `${API_BASE}/files/${filename}`;
 }
 
+/**
+ * تنزيل ملف مُصادَق عليه.
+ *
+ * الرمز محفوظ في الذاكرة لا في الكوكيز، ووسم <a href> العادي لا يحمل ترويسة
+ * Authorization — فكان كل نقر على «تنزيل» يعيد 401 ويعرض JSON خاماً للمستخدم.
+ * هنا نجلب الملف عبر fetch بالترويسة ثم نحفظه من blob.
+ *
+ * @param {string} filename اسم الملف على الخادم
+ * @param {string} [saveAs] الاسم المعروض عند الحفظ
+ * @returns {Promise<void>}
+ */
+export async function downloadFile(filename, saveAs) {
+  const res = await fetch(getFileUrl(filename), {
+    headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+  });
+
+  if (!res.ok) {
+    let message = 'تعذّر تنزيل الملف';
+    if (res.status === 401) message = 'انتهت الجلسة، يرجى تسجيل الدخول من جديد';
+    else if (res.status === 403) message = 'غير مصرح لك بالوصول إلى هذا الملف';
+    else if (res.status === 404) message = 'الملف غير موجود على الخادم';
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = saveAs || filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // إطلاق الذاكرة بعد أن يلتقط المتصفح التنزيل
+  setTimeout(() => window.URL.revokeObjectURL(url), 10000);
+}
+
 // ========== Security Stats (Admin) ==========
 export function getSecurityStats() {
   return request('GET', '/security/stats');

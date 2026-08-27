@@ -59,7 +59,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     # CSP: يسمح بخطوط Google التي تستخدمها صفحة الدخول فقط، ولا شيء غيرها.
     # 'unsafe-inline' للأنماط مطلوب لأن React يضع أنماطاً سطرية.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
 
     gzip on;
     gzip_vary on;
