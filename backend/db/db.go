@@ -74,23 +74,35 @@ func ResetAdminPasswordIfRequested() error {
 	return nil
 }
 
+// Seed يُشغَّل عند كل إقلاع.
+//
+// كان يتوقّف إن وُجد أي مستخدم، فأي إضافة للبذور (قسم جديد، صلاحية،
+// حساب تجريبي) لا تصل إلى نشر قائم أبداً — تصل فقط لقاعدة فارغة.
+// كل عبارات seed.sql من نوع INSERT OR IGNORE، فتشغيلها متكرراً إضافيّ
+// بحت: يُدخل الناقص ولا يمسّ صفاً موجوداً ولا يغيّر بيانات العمل.
 func Seed() error {
-	// تحقق إذا البيانات موجودة
-	var count int
-	err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&count)
-	if err != nil {
+	var before int
+	if err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&before); err != nil {
 		return err
 	}
-	if count > 0 {
-		log.Println("✓ البيانات التجريبية موجودة مسبقاً")
-		return nil
-	}
 
-	if _, err = DB.Exec(seedSQL); err != nil {
+	if _, err := DB.Exec(seedSQL); err != nil {
 		return fmt.Errorf("فشل إدخال البيانات التجريبية: %w", err)
 	}
 
-	log.Println("✓ تم إدخال البيانات التجريبية بنجاح")
+	var after int
+	if err := DB.QueryRow("SELECT COUNT(*) FROM users").Scan(&after); err != nil {
+		return err
+	}
+
+	switch {
+	case before == 0:
+		log.Printf("✓ تم إدخال البيانات التجريبية بنجاح (%d مستخدماً)", after)
+	case after > before:
+		log.Printf("✓ البذور: أُضيف %d مستخدماً جديداً (المجموع %d)", after-before, after)
+	default:
+		log.Println("✓ البذور محدَّثة — لا جديد")
+	}
 	return nil
 }
 

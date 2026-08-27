@@ -69,10 +69,14 @@ INSERT OR IGNORE INTO users (id, name, email, password_hash, role, department_id
 (14, 'أ. رنا علي',       'rana@parliament.iq',    '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'researcher', 'legal_studies', 'قانون دستوري', 'active'),
 (15, 'أ. حسين كاظم',     'hussein@parliament.iq', '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'researcher', 'budget_research', 'موازنة عامة', 'active'),
 (16, 'د. ليلى عباس',     'layla@parliament.iq',   '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'researcher', 'parliament_library', 'أرشفة ومعلومات', 'active'),
-(17, 'أ. مصطفى جواد',    'mustafa@parliament.iq', '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'researcher', 'research_support', 'دعم بحثي', 'active'),
+(17, 'أ. مصطفى جواد',    'mustafa@parliament.iq', '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'researcher', 'research_support', 'دعم بحثي', 'active');
+
 -- باحث ثانٍ في قسم البحوث: تسليم المهمة بين باحثَي القسم الواحد
--- (رئيس القسم مقيَّد بقسمه) كان غير قابل للتجربة ببذرة باحث واحد لكل قسم
-(18, 'أ. زينب الطائي',   'zainab@parliament.iq',  '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'researcher', 'research', 'سياسات عامة', 'active');
+-- (رئيس القسم مقيَّد بقسمه) كان غير قابل للتجربة ببذرة باحث واحد لكل قسم.
+-- بلا معرّف ثابت: المعرّفات 1..21 محجوزة، وتفرّد البريد يمنع التكرار
+-- عند إعادة البذر.
+INSERT OR IGNORE INTO users (name, email, password_hash, role, department_id, status) VALUES
+('أ. زينب الطائي', 'zainab@parliament.iq', '$2a$10$GcWkIIlSvHAEQGxCsftciekkncZCUAK7TAk.DGsoOZ3OcHK8w0qNW', 'researcher', 'research', 'active');
 
 -- المدققين - Proofreaders
 INSERT OR IGNORE INTO users (id, name, email, password_hash, role, status) VALUES
