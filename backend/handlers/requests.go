@@ -571,8 +571,10 @@ func WithdrawRequest(w http.ResponseWriter, r *http.Request) {
 
 	txErr := withTx(func(tx *sql.Tx) error {
 		now := time.Now()
+		// «مسحوب» لا «مرفوض»: سحب الجهة الطالبة لطلبها ليس رفضاً من الدائرة،
+		// وخلطهما يضخّم إحصاءات الرفض ويُظهر للنائب أن طلبه رُفض.
 		res, err := tx.Exec(
-			"UPDATE requests SET status = 'rejected', updated_at = ? WHERE id = ? AND status = 'pending'", now, id)
+			"UPDATE requests SET status = 'withdrawn', updated_at = ? WHERE id = ? AND status = 'pending'", now, id)
 		if err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
 		}
@@ -594,6 +596,88 @@ func WithdrawRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم سحب الطلب"})
+}
+
+// PUT /api/requests/{id}/reject - مدير الدائرة يرفض طلباً قبل إحالته
+//
+// كانت واجهة المدير تعرض خيار «رفض وإرجاع» مشروطاً بحالة
+// under_manager_review المحذوفة من المخطط، فلم يكن أي دور يستطيع رفض طلب
+// غير مختص؛ الحالة 'rejected' لم تكن تُكتب إلا من سحب النائب لطلبه.
+// الرفض متاح قبل الإحالة فقط (pending)، ويشترط سبباً مسجَّلاً.
+func RejectRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	var input struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "بيانات غير صالحة",
+		})
+		return
+	}
+
+	reason := sanitize(input.Reason)
+	if reason == "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "سبب الرفض مطلوب",
+		})
+		return
+	}
+
+	var deputyID sql.NullInt64
+	var status string
+	if err := db.DB.QueryRow(
+		"SELECT deputy_id, status FROM requests WHERE id = ?", id,
+	).Scan(&deputyID, &status); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
+		return
+	}
+	if status != "pending" {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "لا يمكن الرفض بعد إحالة الطلب — استخدم الإرجاع",
+		})
+		return
+	}
+
+	var userName string
+	logErr("RejectRequest userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+
+	note := "رُفض الطلب من مدير الدائرة — " + reason
+
+	txErr := withTx(func(tx *sql.Tx) error {
+		now := time.Now()
+		res, err := tx.Exec(
+			"UPDATE requests SET status = 'rejected', updated_at = ? WHERE id = ? AND status = 'pending'", now, id)
+		if err != nil {
+			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("الطلب لم يعد متاحاً للرفض")
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO notes (entity_type, entity_id, user_id, user_name, content) VALUES ('request', ?, ?, ?, ?)`,
+			id, userID, userName, note,
+		); err != nil {
+			return fmt.Errorf("INSERT note: %w", err)
+		}
+		if deputyID.Valid {
+			if err := createNotificationTx(tx, int(deputyID.Int64), "رُفض طلبكم",
+				fmt.Sprintf("رُفض الطلب %s: %s", id, reason),
+				"warning", strPtr("request"), &id); err != nil {
+				return err
+			}
+		}
+		return logActivityTx(tx, r, userID, userName, "reject_request", strPtr("request"), &id, note)
+	})
+
+	if txErr != nil {
+		log.Printf("RejectRequest tx failed: %v", txErr)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل رفض الطلب"})
+		return
+	}
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم رفض الطلب"})
 }
 
 // parseFlexibleDate يقبل YYYY-MM-DD أو RFC3339 الكامل

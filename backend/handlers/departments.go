@@ -12,7 +12,7 @@ func GetDepartments(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.DB.Query(`
 		SELECT d.id, d.name, d.head_name,
 			(SELECT COUNT(*) FROM users WHERE department_id = d.id AND role = 'researcher') as researcher_count,
-			(SELECT COUNT(*) FROM requests WHERE assigned_department = d.id AND status NOT IN ('completed', 'rejected')) as active_requests,
+			(SELECT COUNT(*) FROM requests WHERE assigned_department = d.id AND status NOT IN ('completed', 'rejected', 'withdrawn')) as active_requests,
 			d.color
 		FROM departments d ORDER BY d.name
 	`)
@@ -43,7 +43,7 @@ func GetDepartment(w http.ResponseWriter, r *http.Request) {
 	err := db.DB.QueryRow(`
 		SELECT d.id, d.name, d.head_name,
 			(SELECT COUNT(*) FROM users WHERE department_id = d.id AND role = 'researcher'),
-			(SELECT COUNT(*) FROM requests WHERE assigned_department = d.id AND status NOT IN ('completed', 'rejected')),
+			(SELECT COUNT(*) FROM requests WHERE assigned_department = d.id AND status NOT IN ('completed', 'rejected', 'withdrawn')),
 			d.color
 		FROM departments d WHERE d.id = ?
 	`, id).Scan(&d.ID, &d.Name, &d.HeadName, &d.ResearcherCount, &d.ActiveRequests, &d.Color)

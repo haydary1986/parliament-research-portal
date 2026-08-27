@@ -135,12 +135,13 @@ func rebuildRequestsIfOutdated() error {
 	// المخطط محدَّث مسبقاً؟ لا شيء لفعله
 	upToDate := strings.Contains(storedSQL, "pending_manager_send") &&
 		strings.Contains(storedSQL, "confidentiality") &&
-		strings.Contains(storedSQL, "requester_type")
+		strings.Contains(storedSQL, "requester_type") &&
+		strings.Contains(storedSQL, "withdrawn")
 	if upToDate {
 		return nil
 	}
 
-	log.Println("⏳ ترحيل: إعادة بناء جدول requests (أعمدة السرية والجهة الطالبة + حالة جديدة)...")
+	log.Println("⏳ ترحيل: إعادة بناء جدول requests (السرية + الجهة الطالبة + حالتا pending_manager_send و withdrawn)...")
 
 	createStmt, err := extractCreateTable("requests")
 	if err != nil {

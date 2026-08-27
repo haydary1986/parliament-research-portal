@@ -221,6 +221,11 @@ export function returnRequest(id, data) {
   return request('PUT', `/requests/${id}/return`, data);
 }
 
+// رفض الطلب قبل الإحالة — سبب إلزامي يُسجَّل في ملاحظات الطلب
+export function rejectRequest(id, reason) {
+  return request('PUT', `/requests/${id}/reject`, { reason });
+}
+
 // ========== Final Review (Manager) ==========
 export function finalReviewRequest(id, decision, notes = '') {
   return request('PUT', `/requests/${id}/final-review`, { decision, notes });

@@ -136,6 +136,7 @@ export const STATUS_LABELS = {
   completed: 'مكتمل',
   returned_exists: 'لا يمكن التنفيذ',  // كان: مُرجَع (req.md - مدير ن2)
   rejected: 'مرفوض',
+  withdrawn: 'مسحوب',
   // مهام بحث
   sent_to_proofreader: 'أرسل للتدقيق',
   submitted: 'مقدّم',

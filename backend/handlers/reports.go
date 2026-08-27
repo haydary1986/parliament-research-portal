@@ -100,7 +100,7 @@ func GetOperationsReport(w http.ResponseWriter, r *http.Request) {
 	logErr("report overdue", db.DB.QueryRow(`
 		SELECT COUNT(*) FROM requests
 		WHERE deadline IS NOT NULL AND deadline < CURRENT_TIMESTAMP
-		  AND status NOT IN ('delivered','completed','returned_exists','rejected')
+		  AND status NOT IN ('delivered','completed','returned_exists','rejected','withdrawn')
 	`).Scan(&rep.Overdue))
 
 	// متوسط مدة الإنجاز بالأيام
@@ -113,12 +113,12 @@ func GetOperationsReport(w http.ResponseWriter, r *http.Request) {
 	if rows, err := db.DB.Query(`
 		SELECT d.id, d.name,
 		  (SELECT COUNT(*) FROM requests q WHERE q.assigned_department = d.id
-		     AND q.status NOT IN ('delivered','completed','returned_exists','rejected')),
+		     AND q.status NOT IN ('delivered','completed','returned_exists','rejected','withdrawn')),
 		  (SELECT COUNT(*) FROM requests q WHERE q.assigned_department = d.id
 		     AND q.status IN ('delivered','completed')),
 		  (SELECT COUNT(*) FROM requests q WHERE q.assigned_department = d.id
 		     AND q.deadline IS NOT NULL AND q.deadline < CURRENT_TIMESTAMP
-		     AND q.status NOT IN ('delivered','completed','returned_exists','rejected')),
+		     AND q.status NOT IN ('delivered','completed','returned_exists','rejected','withdrawn')),
 		  (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id AND u.role = 'researcher'),
 		  (SELECT COALESCE(AVG(julianday(q.completed_date) - julianday(q.date_received)), 0)
 		     FROM requests q WHERE q.assigned_department = d.id AND q.completed_date IS NOT NULL)
@@ -161,7 +161,7 @@ func GetOperationsReport(w http.ResponseWriter, r *http.Request) {
 		SELECT id, title, deputy_name, committee, status, assigned_department, date_received, deadline
 		FROM requests
 		WHERE deadline IS NOT NULL AND deadline < CURRENT_TIMESTAMP
-		  AND status NOT IN ('delivered','completed','returned_exists','rejected')
+		  AND status NOT IN ('delivered','completed','returned_exists','rejected','withdrawn')
 		ORDER BY deadline ASC LIMIT 100
 	`); err == nil {
 		for rows.Next() {

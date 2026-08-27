@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS requests (
         'pending', 'assigned', 'confirmed', 'in_progress', 'review',
         'pending_dept_review', 'proofreading',
         'pending_assistant', 'pending_dept_send', 'pending_manager_send',
-        'delivered', 'completed', 'returned_exists', 'rejected'
+        'delivered', 'completed', 'returned_exists', 'rejected', 'withdrawn'
     )),
     -- يبقى للقسم الرئيسي (متوافق مع القديم) - متعدد الأقسام في request_departments
     assigned_department TEXT REFERENCES departments(id),

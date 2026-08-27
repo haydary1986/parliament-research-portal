@@ -473,6 +473,24 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
     finally { setBusy(false) }
   }
 
+  const [rejectReason, setRejectReason] = useState('')
+  const [showReject, setShowReject] = useState(false)
+
+  // رفض الطلب قبل الإحالة — خيار «رفض وإرجاع» كان في كتلة ميتة مشروطة
+  // بحالة under_manager_review المحذوفة من المخطط، فلم يكن أي دور يستطيع
+  // رفض طلب غير مختص.
+  const rejectReq = async () => {
+    const reason = rejectReason.trim()
+    if (!reason) { toast.error('سبب الرفض مطلوب'); return }
+    setBusy(true)
+    try {
+      await api.rejectRequest(d.id, reason)
+      toast.success('تم رفض الطلب')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
   const submitReview = async () => {
     setBusy(true)
     try {
@@ -663,7 +681,29 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
                 {d.status === 'pending' && (
                   <button onClick={returnReq} disabled={busy} className="btn-outline flex-1">لا يمكن التنفيذ</button>
                 )}
+                {d.status === 'pending' && (
+                  <button onClick={() => setShowReject((v) => !v)} disabled={busy} className="btn-outline flex-1 text-[var(--color-danger-700)]">
+                    رفض الطلب
+                  </button>
+                )}
               </div>
+
+              {d.status === 'pending' && showReject && (
+                <div className="card p-3 mt-3 bg-red-50 border-red-200">
+                  <label className="label label-required" htmlFor="reject-reason">سبب الرفض</label>
+                  <textarea
+                    id="reject-reason"
+                    className="textarea"
+                    rows={2}
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="مثال: الطلب خارج نطاق اختصاص الدائرة"
+                  />
+                  <button onClick={rejectReq} disabled={busy || !rejectReason.trim()} className="btn-danger w-full mt-2">
+                    {busy ? 'جاري...' : 'تأكيد الرفض'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

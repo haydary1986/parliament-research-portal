@@ -95,6 +95,9 @@ func main() {
 	// سحب الطلب: الجهة الطالبة، ما دام لم يُحَل بعد
 	mux.Handle("PUT /api/requests/{id}/withdraw", role("deputy")(http.HandlerFunc(handlers.WithdrawRequest)))
 
+	// رفض الطلب قبل الإحالة (سبب إلزامي)
+	mux.Handle("PUT /api/requests/{id}/reject", role("manager")(http.HandlerFunc(handlers.RejectRequest)))
+
 	// =============================================
 	// Workflow الجديد (req.md)
 	// =============================================

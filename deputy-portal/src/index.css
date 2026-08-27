@@ -563,7 +563,7 @@ html, body {
 .status-review, .status-pending_dept_review, .status-proofreading,
 .status-pending_assistant, .status-pending_dept_send, .status-pending_manager_send,
 .status-under_manager_review,
-.status-delivered, .status-completed, .status-returned_exists, .status-rejected,
+.status-delivered, .status-completed, .status-returned_exists, .status-rejected, .status-withdrawn,
 .status-sent_to_proofreader, .status-submitted, .status-returned,
 .status-sent, .status-received, .status-no_response {
   display: inline-flex; align-items: center; gap: 0.375rem;
@@ -586,6 +586,7 @@ html, body {
 .status-completed, .status-received { background: #ECFDF5; color: #047857; border-color: #A7F3D0; }
 .status-returned_exists { background: #FFF7ED; color: #C2410C; border-color: #FED7AA; }
 .status-rejected, .status-returned, .status-no_response { background: #FEF2F2; color: #B91C1C; border-color: #FECACA; }
+.status-withdrawn { background: #F1F5F9; color: #475569; border-color: #CBD5E1; }
 .status-sent_to_proofreader { background: #FDF2F8; color: #BE185D; border-color: #FBCFE8; }
 .status-submitted { background: #F0F9FF; color: #0369A1; border-color: #BAE6FD; }
 
