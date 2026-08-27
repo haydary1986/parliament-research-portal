@@ -9,7 +9,7 @@ import SuperAdminPortal from './SuperAdminPortal'
 import { login as apiLogin, logout as apiLogout, setToken } from './api'
 import Spinner from './components/ui/Spinner'
 import { ToastProvider, useToast } from './components/ui/Toast'
-import { IconMail, IconLock, IconEye, IconEyeOff } from './components/icons/Icons'
+import { IconMail, IconLock, IconEye, IconEyeOff, IconUser } from './components/icons/Icons'
 import StateEmblem from './components/national/StateEmblem'
 import CouncilLogo from './components/national/CouncilLogo'
 import IraqFlag, { FlagStripe } from './components/national/IraqFlag'
@@ -37,26 +37,81 @@ const SERVICE_JOURNEY = [
   { step: 'تسليم البحث', actor: 'رئيس القسم أو مدير الدائرة' },
 ]
 
+// =============================================
+// حسابات الاختبار — دخول بضغطة واحدة
+// =============================================
+// ⚠️ تكشف بيانات دخول كل الأدوار — بما فيها الأدمن — لأي زائر.
+// مقصودة للفحص أثناء التطوير والعرض. لإخفائها عند التشغيل الرسمي:
+// اضبط VITE_SHOW_DEMO_ACCOUNTS=false وأعد البناء (لا حاجة لتعديل الشيفرة).
+const SHOW_DEMO_ACCOUNTS = import.meta.env.VITE_SHOW_DEMO_ACCOUNTS !== 'false'
+const DEMO_PASSWORD = '123456'
+
+const DEMO_GROUPS = [
+  {
+    portal: 'الجهات الطالبة',
+    accounts: [
+      { email: 'khaled@parliament.iq', name: 'د. خالد العبيدي', hint: 'اللجنة المالية' },
+      { email: 'sara@parliament.iq', name: 'أ. سارة عبدالرحمن', hint: 'اللجنة القانونية' },
+    ],
+  },
+  {
+    portal: 'مدير الدائرة',
+    accounts: [{ email: 'manager@parliament.iq', name: 'مدير الدائرة', hint: 'الإحالة والتقارير' }],
+  },
+  {
+    portal: 'رؤساء الأقسام',
+    accounts: [
+      { email: 'suad@parliament.iq', name: 'د. سعاد العلوي', hint: 'قسم البحوث' },
+      { email: 'hassan@parliament.iq', name: 'أ. حسن الربيعي', hint: 'بحوث الموازنة' },
+      { email: 'ali.m@parliament.iq', name: 'أ. علي الموسوي', hint: 'الدراسات القانونية' },
+    ],
+  },
+  {
+    portal: 'الباحثون',
+    accounts: [
+      { email: 'nour@parliament.iq', name: 'د. نور الدين', hint: 'قسم البحوث' },
+      { email: 'rana@parliament.iq', name: 'أ. رنا علي', hint: 'الدراسات القانونية' },
+    ],
+  },
+  {
+    portal: 'المدققون اللغويون',
+    accounts: [
+      { email: 'mohammed.k@parliament.iq', name: 'أ. محمد الخطاط', hint: '' },
+      { email: 'huda@parliament.iq', name: 'أ. هدى السامرائي', hint: '' },
+    ],
+  },
+  {
+    portal: 'المعاون',
+    accounts: [{ email: 'assistant@parliament.iq', name: 'د. عبدالكريم الأنصاري', hint: 'التدقيق النهائي' }],
+  },
+  {
+    portal: 'مدير النظام',
+    accounts: [{ email: 'admin@parliament.iq', name: 'مدير النظام', hint: 'إدارة كاملة' }],
+  },
+]
+
 function LoginPage({ onSuccess }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [pendingEmail, setPendingEmail] = useState('')
   const [error, setError] = useState('')
   const toast = useToast()
 
-  const handleLogin = async (e) => {
-    e.preventDefault()
+  // منطق الدخول الوحيد — يستخدمه النموذج وأزرار الدخول السريع معاً
+  const doLogin = async (loginEmail, loginPassword) => {
     setError('')
     setBusy(true)
+    setPendingEmail(loginEmail)
     try {
-      const data = await apiLogin(email, password)
+      const data = await apiLogin(loginEmail, loginPassword)
       if (data.success) {
         const apiUser = data.data.user
         setToken(data.data.token)
         const portalId = ROLE_TO_PORTAL[apiUser.role] || 'deputy'
         toast.success(`أهلاً ${apiUser.name}`)
-        onSuccess({ ...apiUser, email, portal: portalId }, portalId)
+        onSuccess({ ...apiUser, email: loginEmail, portal: portalId }, portalId)
       } else {
         setError(data.message || 'فشل تسجيل الدخول')
       }
@@ -64,7 +119,13 @@ function LoginPage({ onSuccess }) {
       setError(err.message || 'فشل الاتصال بالخادم')
     } finally {
       setBusy(false)
+      setPendingEmail('')
     }
+  }
+
+  const handleLogin = (e) => {
+    e.preventDefault()
+    doLogin(email, password)
   }
 
   return (
@@ -209,6 +270,64 @@ function LoginPage({ onSuccess }) {
               <CouncilLogo size={112} className="sm:!w-32 sm:!h-32" glow />
               <IraqFlag width={54} className="hidden sm:block" wave />
             </div>
+
+            {/* دخول سريع للفحص — ضغطة واحدة تدخل مباشرةً */}
+            {SHOW_DEMO_ACCOUNTS && (
+              <section className="rounded-2xl bg-white/[0.06] backdrop-blur border border-white/10 overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-white/10 flex items-start gap-3">
+                  <span
+                    aria-hidden="true"
+                    className="mt-0.5 w-8 h-8 rounded-lg bg-[var(--color-gold-500)]/20 text-[var(--color-gold-300)] flex items-center justify-center flex-shrink-0"
+                  >
+                    <IconUser className="w-4 h-4" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-sm font-bold text-[var(--color-gold-300)]">دخول سريع — حسابات الفحص</h2>
+                    <p className="text-[11px] text-[var(--color-navy-300)] mt-0.5">
+                      اضغط أي حساب لتدخل بوابته مباشرةً · كلمة المرور الموحّدة{' '}
+                      <span className="font-mono text-[var(--color-navy-200)]" dir="ltr">{DEMO_PASSWORD}</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3 max-h-[26rem] overflow-y-auto space-y-3">
+                  {DEMO_GROUPS.map((group) => (
+                    <div key={group.portal}>
+                      <p className="text-[10px] font-bold tracking-[0.14em] text-[var(--color-navy-400)] px-1 mb-1.5">
+                        {group.portal}
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {group.accounts.map((acc) => {
+                          const loading = busy && pendingEmail === acc.email
+                          return (
+                            <button
+                              key={acc.email}
+                              type="button"
+                              onClick={() => doLogin(acc.email, DEMO_PASSWORD)}
+                              disabled={busy}
+                              className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white/[0.06] border border-white/10 hover:bg-white/[0.14] hover:border-[var(--color-gold-500)]/40 disabled:opacity-50 transition-colors text-right"
+                            >
+                              <span
+                                aria-hidden="true"
+                                className="w-8 h-8 rounded-full bg-gradient-to-br from-[var(--color-gold-400)] to-[var(--color-gold-700)] text-[var(--color-navy-950)] flex items-center justify-center text-xs font-bold flex-shrink-0"
+                              >
+                                {loading ? <Spinner size="sm" /> : acc.name.replace(/^(د\.|أ\.)\s*/, '')[0]}
+                              </span>
+                              <span className="flex-1 min-w-0">
+                                <span className="block text-[13px] font-semibold text-white truncate">{acc.name}</span>
+                                <span className="block text-[10px] text-[var(--color-navy-300)] truncate">
+                                  {acc.hint || acc.email}
+                                </span>
+                              </span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* مسار الخدمة البحثية */}
             <section className="p-5 rounded-2xl bg-white/[0.06] backdrop-blur border border-white/10">

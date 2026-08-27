@@ -27,6 +27,9 @@ COPY deputy-portal/package.json deputy-portal/package-lock.json* ./
 RUN npm ci --no-audit --no-fund
 COPY deputy-portal/ ./
 ENV VITE_API_BASE=""
+# حسابات الفحص على صفحة الدخول — اضبطه false عند التشغيل الرسمي
+ARG VITE_SHOW_DEMO_ACCOUNTS=true
+ENV VITE_SHOW_DEMO_ACCOUNTS=$VITE_SHOW_DEMO_ACCOUNTS
 RUN npm run build
 
 # =====================================================
