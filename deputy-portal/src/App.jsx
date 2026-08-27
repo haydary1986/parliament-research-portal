@@ -70,6 +70,7 @@ const DEMO_GROUPS = [
     portal: 'الباحثون',
     accounts: [
       { email: 'nour@parliament.iq', name: 'د. نور الدين', hint: 'قسم البحوث' },
+      { email: 'zainab@parliament.iq', name: 'أ. زينب الطائي', hint: 'قسم البحوث' },
       { email: 'rana@parliament.iq', name: 'أ. رنا علي', hint: 'الدراسات القانونية' },
     ],
   },

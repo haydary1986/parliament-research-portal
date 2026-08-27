@@ -269,10 +269,26 @@ func CreateRequest(w http.ResponseWriter, r *http.Request) {
 			&user.Name, &user.Committee, &user.Phone, &user.Email, &user.RequesterType,
 		))
 
+	// الغرض مقيَّد بـ CHECK في المخطط — نتحقّق هنا لنعيد 400 مفهومة
+	// بدل انفجار القيد داخل INSERT وعودة 500 غامضة
+	purpose, okPurpose := normalizePurpose(input.Purpose)
+	if !okPurpose {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "غرض الطلب غير صالح — يجب أن يكون رقابياً أو تشريعياً أو أخرى",
+		})
+		return
+	}
+
 	// اختيار اللجنة: من الإدخال إذا قدّمها الطالب، وإلا من سجل المستخدم
 	committee := sanitize(input.Committee)
 	if committee == "" && user.Committee != nil {
 		committee = *user.Committee
+	}
+	if bad := validateCommittees(committee); bad != "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "لجنة غير معتمدة: " + bad,
+		})
+		return
 	}
 
 	canShare := 0
@@ -294,7 +310,7 @@ func CreateRequest(w http.ResponseWriter, r *http.Request) {
 	_, err := db.DB.Exec(`
 		INSERT INTO requests (id, title, description, deputy_id, deputy_name, committee, purpose, phone, email, status, can_share, confidentiality, requester_type, date_received)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
-	`, reqID, sanitize(input.Title), sanitize(input.Description), userID, user.Name, committee, sanitize(input.Purpose),
+	`, reqID, sanitize(input.Title), sanitize(input.Description), userID, user.Name, committee, purpose,
 		user.Phone, user.Email, canShare, confidentiality, requesterType, time.Now())
 
 	if err != nil {
@@ -449,8 +465,7 @@ func UpdateRequest(w http.ResponseWriter, r *http.Request) {
 	if purpose == "" && current.Purpose != nil {
 		purpose = *current.Purpose
 	}
-	validPurposes := map[string]bool{"oversight": true, "legislative": true, "other": true}
-	if purpose != "" && !validPurposes[purpose] {
+	if purpose != "" && !RequestPurposes[purpose] {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الغرض غير صالح"})
 		return
 	}
@@ -458,6 +473,12 @@ func UpdateRequest(w http.ResponseWriter, r *http.Request) {
 	committee := sanitize(input.Committee)
 	if committee == "" && current.Committee != nil {
 		committee = *current.Committee
+	}
+	if bad := validateCommittees(committee); bad != "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "لجنة غير معتمدة: " + bad,
+		})
+		return
 	}
 
 	canShare := current.CanShare

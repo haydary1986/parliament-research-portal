@@ -342,6 +342,77 @@ const (
 	ConfidentialityConfidential = "confidential"
 )
 
+// أغراض الطلب — مطابقة لقيد CHECK على عمود requests.purpose.
+// كان الحقل يُمرَّر للقاعدة بلا تحقّق، فتنفجر قيود CHECK داخل INSERT
+// ويعود 500 غامض بدل 400 برسالة مفهومة.
+var RequestPurposes = map[string]bool{
+	"oversight":   true, // رقابي
+	"legislative": true, // تشريعي
+	"other":       true, // أخرى
+}
+
+// normalizePurpose يرجع القيمة المعتمدة، و ok=false لقيمة غير معروفة.
+// الحقل الفارغ يُعامَل كـ "other" لأنه اختياري في نموذج التقديم.
+func normalizePurpose(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "other", true
+	}
+	if RequestPurposes[v] {
+		return v, true
+	}
+	return "", false
+}
+
+// اللجان النيابية الرسمية بعد تعديل النظام الداخلي (req.md — بوابة النواب ن1).
+// كانت القائمة مطبَّقة في الواجهة فقط، والخادم يقبل أي نص ويخزّنه —
+// فتتلوّث تقارير التوزيع حسب اللجنة.
+var OfficialCommittees = map[string]bool{
+	"اللجنة القانونية":                true,
+	"لجنة العلاقات الخارجية":          true,
+	"لجنة الخدمات والإعمار":           true,
+	"لجنة الاقتصاد والتجارة والصناعة": true,
+	"لجنة الاستثمار والتنمية":         true,
+	"لجنة الأقاليم والمحافظات غير المنتظمة بإقليم والتخطيط الستراتيجي والبرنامج الحكومي والأوقاف": true,
+	"لجنة الصحة ومكافحة المخدرات والمؤثرات العقلية":                                               true,
+	"لجنة التعليم العالي والبحث العلمي":                                                           true,
+	"لجنة التربية": true,
+	"لجنة العمل ومؤسسات المجتمع المدني والخدمة العامة الاتحادية والشباب والرياضة": true,
+	"لجنة النقل والاتصالات والحوكمة":                                              true,
+	"لجنة المنافذ الحدودية وحماية المنتج الوطني":                                  true,
+	"لجنة السلوك النيابي":                                                         true,
+	"لجنة الزراعة والموارد المائية والأهوار والبيئة":                              true,
+	"لجنة الكهرباء والطاقة":                                                       true,
+	"لجنة الشهداء والضحايا والسجناء السياسيين":                                    true,
+	"اللجنة المالية":                                                              true,
+	"لجنة النزاهة":                                                                true,
+	"لجنة الأمن والدفاع":                                                          true,
+	"لجنة النفط والغاز والثروات الطبيعية":                                         true,
+	"لجنة حقوق الإنسان":                                                           true,
+	"لجنة الهجرة والمهجرين والمصالحة المجتمعية":                                   true,
+	"لجنة الثقافة والسياحة والآثار والإعلام":                                      true,
+	"أخرى": true,
+}
+
+// validateCommittees يتحقّق من قائمة لجان مفصولة بفاصلة عربية (صيغة الواجهة).
+// يرجع اللجنة غير المعتمدة الأولى، أو "" إن كانت كلها صحيحة.
+func validateCommittees(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	for _, part := range strings.Split(v, "،") {
+		name := strings.TrimSpace(part)
+		if name == "" {
+			continue
+		}
+		if !OfficialCommittees[name] {
+			return name
+		}
+	}
+	return ""
+}
+
 // normalizeConfidentiality يقبل القيمة المعروفة فقط ويرجع 'public' لأي شيء آخر
 func normalizeConfidentiality(v string) string {
 	if v == ConfidentialityConfidential {
