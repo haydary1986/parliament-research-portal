@@ -385,6 +385,8 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
   const [classification, setClassification] = useState(CLASSIFICATIONS[0])
   const [days, setDays] = useState(30)
   const [editOpen, setEditOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const [showReject, setShowReject] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
@@ -472,9 +474,6 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
     } catch (e) { toast.error(e.message) }
     finally { setBusy(false) }
   }
-
-  const [rejectReason, setRejectReason] = useState('')
-  const [showReject, setShowReject] = useState(false)
 
   // رفض الطلب قبل الإحالة — خيار «رفض وإرجاع» كان في كتلة ميتة مشروطة
   // بحالة under_manager_review المحذوفة من المخطط، فلم يكن أي دور يستطيع
