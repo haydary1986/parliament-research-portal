@@ -168,30 +168,11 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// التحقق من صلاحية الوصول
-	if role == "deputy" && (req.DeputyID == nil || *req.DeputyID != userID) {
+	// التحقق من صلاحية الوصول — يشمل الآن الباحث والمدقق أيضاً،
+	// إذ كان أي مستخدم مصادَق يقرأ أي طلب قبل إضافة المرفقات
+	if !canAccessRequest(id, userID, role) {
 		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بعرض هذا الطلب"})
 		return
-	}
-	if role == "department_head" {
-		var deptID string
-		db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&deptID)
-		// السماح إذا كان قسمه هو الرئيسي أو ضمن request_departments
-		allowed := req.AssignedDepartment != nil && *req.AssignedDepartment == deptID
-		if !allowed {
-			var n int
-			db.DB.QueryRow(
-				"SELECT COUNT(*) FROM request_departments WHERE request_id = ? AND department_id = ?",
-				id, deptID,
-			).Scan(&n)
-			if n > 0 {
-				allowed = true
-			}
-		}
-		if !allowed {
-			writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بعرض هذا الطلب"})
-			return
-		}
 	}
 
 	// جلب التأكيد
@@ -211,6 +192,29 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 		JOIN research_tasks rt ON rt.id = ir.research_task_id
 		WHERE rt.request_id = ?
 	`, id).Scan(&req.OfficialLettersCount))
+
+	// ملفات البحث المرفوعة — بدونها كانت سلسلة المراجعة تعتمد بحوثاً لا تراها،
+	// والجهة الطالبة لا تستلم مخرَج طلبها إطلاقاً
+	fileRows, err := db.DB.Query(`
+		SELECT rt.id, rt.researcher_id, COALESCE(u.name, ''), rt.file_path,
+		       rt.status, rt.submitted_date, rt.updated_at
+		FROM research_tasks rt
+		LEFT JOIN users u ON u.id = rt.researcher_id
+		WHERE rt.request_id = ? AND rt.file_path IS NOT NULL AND rt.file_path != ''
+		ORDER BY rt.updated_at DESC
+	`, id)
+	if err == nil {
+		defer fileRows.Close()
+		for fileRows.Next() {
+			var f models.RequestFile
+			if fileRows.Scan(&f.TaskID, &f.ResearcherID, &f.ResearcherName,
+				&f.FilePath, &f.TaskStatus, &f.SubmittedDate, &f.UpdatedAt) == nil {
+				req.Files = append(req.Files, f)
+			}
+		}
+	} else {
+		logErr("GetRequest files", err)
+	}
 
 	// جلب الأقسام المُحالة (multi-department)
 	deptRows, _ := db.DB.Query("SELECT department_id FROM request_departments WHERE request_id = ?", id)
@@ -301,7 +305,7 @@ func CreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logActivity(userID, user.Name, "create_request", strPtr("request"), &reqID, "تقديم طلب بحثي جديد")
+	logActivityIP(r, userID, user.Name, "create_request", strPtr("request"), &reqID, "تقديم طلب بحثي جديد")
 
 	writeJSON(w, http.StatusCreated, models.APIResponse{
 		Success: true, Message: "تم تقديم الطلب بنجاح", Data: map[string]string{"id": reqID},
@@ -359,7 +363,7 @@ func ReturnRequest(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("INSERT note: %w", err)
 		}
 
-		if err := logActivityTx(tx, userID, userName, "return_request", strPtr("request"), &id, "إرجاع الطلب - بحث موجود مسبقاً"); err != nil {
+		if err := logActivityTx(tx, r, userID, userName, "return_request", strPtr("request"), &id, "إرجاع الطلب - بحث موجود مسبقاً"); err != nil {
 			return err
 		}
 
@@ -515,7 +519,7 @@ func UpdateRequest(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("INSERT note: %w", err)
 		}
 
-		return logActivityTx(tx, userID, userName, "update_request", strPtr("request"), &id, "تعديل بيانات الطلب")
+		return logActivityTx(tx, r, userID, userName, "update_request", strPtr("request"), &id, "تعديل بيانات الطلب")
 	})
 
 	if txErr != nil {
@@ -525,6 +529,71 @@ func UpdateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم تعديل الطلب بنجاح"})
+}
+
+// PUT /api/requests/{id}/withdraw - الجهة الطالبة تسحب طلبها
+// متاح ما دام الطلب لم يُحَل بعد (pending فقط)
+func WithdrawRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	var input struct {
+		Reason string `json:"reason"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&input)
+
+	var owner sql.NullInt64
+	var status string
+	if err := db.DB.QueryRow("SELECT deputy_id, status FROM requests WHERE id = ?", id).Scan(&owner, &status); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
+		return
+	}
+	if !owner.Valid || int(owner.Int64) != userID {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "لا يمكنك سحب طلب لا يخصك"})
+		return
+	}
+	if status != "pending" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{
+			Success: false, Message: "لا يمكن السحب بعد إحالة الطلب — راجع مدير الدائرة",
+		})
+		return
+	}
+
+	var userName string
+	logErr("WithdrawRequest userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+
+	note := sanitize(input.Reason)
+	if note == "" {
+		note = "سحبت الجهة الطالبة الطلب"
+	} else {
+		note = "سحبت الجهة الطالبة الطلب — " + note
+	}
+
+	txErr := withTx(func(tx *sql.Tx) error {
+		now := time.Now()
+		res, err := tx.Exec(
+			"UPDATE requests SET status = 'rejected', updated_at = ? WHERE id = ? AND status = 'pending'", now, id)
+		if err != nil {
+			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return fmt.Errorf("الطلب لم يعد متاحاً للسحب")
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO notes (entity_type, entity_id, user_id, user_name, content) VALUES ('request', ?, ?, ?, ?)`,
+			id, userID, userName, note,
+		); err != nil {
+			return fmt.Errorf("INSERT note: %w", err)
+		}
+		return logActivityTx(tx, r, userID, userName, "withdraw_request", strPtr("request"), &id, note)
+	})
+
+	if txErr != nil {
+		log.Printf("WithdrawRequest tx failed: %v", txErr)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل سحب الطلب"})
+		return
+	}
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم سحب الطلب"})
 }
 
 // parseFlexibleDate يقبل YYYY-MM-DD أو RFC3339 الكامل
@@ -687,7 +756,7 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 		if len(researchers) > 0 {
 			details += fmt.Sprintf(" وتعيين %d باحث مباشرةً من مدير الدائرة", len(researchers))
 		}
-		if err := logActivityTx(tx, userID, userName, "assign_request", strPtr("request"), &id, details); err != nil {
+		if err := logActivityTx(tx, r, userID, userName, "assign_request", strPtr("request"), &id, details); err != nil {
 			return err
 		}
 
@@ -848,15 +917,7 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 		researchers = []int{input.ResearcherID}
 	}
 	// تنظيف التكرار
-	seenR := map[int]bool{}
-	cleanR := researchers[:0]
-	for _, r := range researchers {
-		if r > 0 && !seenR[r] {
-			seenR[r] = true
-			cleanR = append(cleanR, r)
-		}
-	}
-	researchers = cleanR
+	researchers = dedupeInts(researchers)
 
 	if input.ServiceType == "" || input.Classification == "" || len(researchers) == 0 {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "يرجى تعبئة نوع الخدمة والتصنيف وباحث واحد على الأقل"})
@@ -915,7 +976,7 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 		if len(researchers) > 1 {
 			details = fmt.Sprintf("تأكيد الطلب وتعيين %d باحثين", len(researchers))
 		}
-		if err := logActivityTx(tx, userID, userName, "confirm_request", strPtr("request"), &id, details); err != nil {
+		if err := logActivityTx(tx, r, userID, userName, "confirm_request", strPtr("request"), &id, details); err != nil {
 			return err
 		}
 
@@ -942,129 +1003,4 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Message: "تم تأكيد الطلب وتعيين الباحثين بنجاح",
 	})
-}
-
-// PUT /api/requests/{id}/final-review - مراجعة نهائية من مدير الدائرة بعد التدقيق
-func FinalReviewRequest(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	userID := getUserID(r)
-
-	var input struct {
-		Decision string `json:"decision"` // "approve" | "reject"
-		Notes    string `json:"notes"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
-		return
-	}
-	if input.Decision != "approve" && input.Decision != "reject" {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "القرار يجب أن يكون approve أو reject"})
-		return
-	}
-
-	var currentStatus string
-	if err := db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&currentStatus); err != nil {
-		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
-		return
-	}
-	if currentStatus != "under_manager_review" {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "الطلب ليس في مرحلة المراجعة النهائية"})
-		return
-	}
-
-	var userName string
-	logErr("FinalReview userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
-
-	if input.Decision == "approve" {
-		var deputyID int
-		var rtID string
-		var researcherID int
-
-		txErr := withTx(func(tx *sql.Tx) error {
-			now := time.Now()
-			if _, err := tx.Exec(`
-				UPDATE requests SET status = 'delivered', completed_date = ?,
-				       delivered_to_deputy_date = ?, final_review_by = ?, final_review_date = ?, updated_at = ?
-				WHERE id = ?
-			`, now, now, userID, now, now, id); err != nil {
-				return fmt.Errorf("UPDATE requests: %w", err)
-			}
-
-			if err := tx.QueryRow("SELECT deputy_id FROM requests WHERE id = ?", id).Scan(&deputyID); err != nil && err != sql.ErrNoRows {
-				return fmt.Errorf("lookup deputy: %w", err)
-			}
-			if err := tx.QueryRow("SELECT id, researcher_id FROM research_tasks WHERE request_id = ?", id).Scan(&rtID, &researcherID); err != nil && err != sql.ErrNoRows {
-				return fmt.Errorf("lookup research task: %w", err)
-			}
-
-			if deputyID > 0 {
-				if err := createNotificationTx(tx, deputyID, "تم تسليم البحث",
-					fmt.Sprintf("تم الانتهاء من بحث طلبك %s وتسليم نسخة إليك", id),
-					"success", strPtr("request"), &id); err != nil {
-					return err
-				}
-			}
-			if researcherID > 0 {
-				if err := createNotificationTx(tx, researcherID, "يرجى الموافقة على الأرشفة",
-					fmt.Sprintf("تم اعتماد بحثك. يرجى تحديد موافقتك على إرسال نسخة للمستودع الرقمي (مهمة %s)", rtID),
-					"info", strPtr("research_task"), &rtID); err != nil {
-					return err
-				}
-			}
-			return logActivityTx(tx, userID, userName, "final_approve", strPtr("request"), &id, "اعتماد نهائي وتسليم للنائب")
-		})
-
-		if txErr != nil {
-			log.Printf("FinalReview approve tx failed: %v", txErr)
-			writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل اعتماد المراجعة"})
-			return
-		}
-		writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم الاعتماد النهائي وتسليم البحث للنائب"})
-		return
-	}
-
-	// رفض
-	note := input.Notes
-	if note == "" {
-		note = "رفض المراجعة النهائية - يرجى المراجعة والتعديل"
-	}
-
-	var rtID string
-	var researcherID int
-
-	txErr := withTx(func(tx *sql.Tx) error {
-		now := time.Now()
-		if _, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?", now, id); err != nil {
-			return fmt.Errorf("UPDATE requests: %w", err)
-		}
-		if err := tx.QueryRow("SELECT id, researcher_id FROM research_tasks WHERE request_id = ?", id).Scan(&rtID, &researcherID); err != nil && err != sql.ErrNoRows {
-			return fmt.Errorf("lookup research task: %w", err)
-		}
-		if rtID != "" {
-			if _, err := tx.Exec("UPDATE research_tasks SET status = 'in_progress', updated_at = ? WHERE id = ?", now, rtID); err != nil {
-				return fmt.Errorf("UPDATE research_task: %w", err)
-			}
-		}
-		if _, err := tx.Exec(
-			`INSERT INTO notes (entity_type, entity_id, user_id, user_name, content) VALUES ('request', ?, ?, ?, ?)`,
-			id, userID, userName, sanitize(note),
-		); err != nil {
-			return fmt.Errorf("INSERT note: %w", err)
-		}
-		if researcherID > 0 {
-			if err := createNotificationTx(tx, researcherID, "رجوع البحث للمراجعة",
-				fmt.Sprintf("تم رفض المراجعة النهائية للطلب %s: %s", id, note),
-				"warning", strPtr("research_task"), &rtID); err != nil {
-				return err
-			}
-		}
-		return logActivityTx(tx, userID, userName, "final_reject", strPtr("request"), &id, "رفض المراجعة النهائية - إرجاع للباحث")
-	})
-
-	if txErr != nil {
-		log.Printf("FinalReview reject tx failed: %v", txErr)
-		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل رفض المراجعة"})
-		return
-	}
-	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم إرجاع البحث للباحث"})
 }

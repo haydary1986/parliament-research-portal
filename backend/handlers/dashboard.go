@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"noab-backend/db"
@@ -19,8 +20,7 @@ func GetDashboardStats(w http.ResponseWriter, r *http.Request) {
 		SELECT COUNT(*) FROM requests WHERE status IN (
 			'assigned', 'confirmed', 'in_progress', 'review',
 			'pending_dept_review', 'proofreading',
-			'pending_assistant', 'pending_dept_send', 'pending_manager_send',
-			'under_manager_review'
+			'pending_assistant', 'pending_dept_send', 'pending_manager_send'
 		)`).Scan(&stats.InProgressCount))
 	// مكتمل: يشمل المُسلَّم للنائب (delivered) قبل قرار الأرشفة
 	logErr("stats completed", db.DB.QueryRow(
@@ -66,14 +66,30 @@ func GetActivityLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /api/notifications
+// GET /api/notifications?page=1&limit=20&unread=true
+// يدعم الترقيم وفلتر غير المقروء، ويُرجع عدّاد غير المقروء دائماً
 func GetNotifications(w http.ResponseWriter, r *http.Request) {
 	userID := getUserID(r)
+	page := getQueryInt(r, "page", 1)
+	limit := getQueryInt(r, "limit", 20)
+	offset := (page - 1) * limit
+	unreadOnly := r.URL.Query().Get("unread") == "true"
+
+	where := "WHERE user_id = ?"
+	args := []interface{}{userID}
+	if unreadOnly {
+		where += " AND is_read = 0"
+	}
+
+	var total, unread int
+	logErr("notifications total", db.DB.QueryRow("SELECT COUNT(*) FROM notifications "+where, args...).Scan(&total))
+	logErr("notifications unread", db.DB.QueryRow(
+		"SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0", userID).Scan(&unread))
 
 	rows, err := db.DB.Query(`
 		SELECT id, user_id, title, message, type, is_read, entity_type, entity_id, created_at
-		FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50
-	`, userID)
+		FROM notifications `+where+` ORDER BY created_at DESC LIMIT ? OFFSET ?
+	`, append(args, limit, offset)...)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{
 			Success: false, Message: "خطأ في جلب الإشعارات",
@@ -82,7 +98,7 @@ func GetNotifications(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var notifications []models.Notification
+	notifications := []models.Notification{}
 	for rows.Next() {
 		var n models.Notification
 		if rows.Scan(&n.ID, &n.UserID, &n.Title, &n.Message, &n.Type,
@@ -91,7 +107,14 @@ func GetNotifications(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: notifications})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data":    notifications,
+		"total":   total,
+		"unread":  unread,
+		"page":    page,
+		"limit":   limit,
+	})
 }
 
 // PUT /api/notifications/{id}/read
@@ -99,10 +122,31 @@ func MarkNotificationRead(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := getUserID(r)
 
-	db.DB.Exec("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?", id, userID)
+	if _, err := db.DB.Exec(
+		"UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?", id, userID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تحديث الإشعار"})
+		return
+	}
 
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Message: "تم تحديث الإشعار",
+	})
+}
+
+// PUT /api/notifications/read-all - تعليم كل إشعارات المستخدم كمقروءة
+func MarkAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+
+	res, err := db.DB.Exec(
+		"UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0", userID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تحديث الإشعارات"})
+		return
+	}
+	n, _ := res.RowsAffected()
+
+	writeJSON(w, http.StatusOK, models.APIResponse{
+		Success: true, Message: fmt.Sprintf("تم تعليم %d إشعاراً كمقروء", n),
 	})
 }
 

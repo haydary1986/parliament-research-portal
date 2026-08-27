@@ -30,6 +30,14 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// قفل الحساب: يوقف الهجوم الموزّع الذي لا يوقفه حظر الـ IP
+	if until, locked := AccountLockedUntil(input.Email); locked {
+		writeJSON(w, http.StatusTooManyRequests, models.APIResponse{
+			Success: false, Message: FormatLockMessage(until),
+		})
+		return
+	}
+
 	var user models.User
 	var passwordHash string
 	var deptID *string
@@ -44,6 +52,9 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if err != nil {
+		// نسجّل المحاولة حتى للبريد غير الموجود، وإلا صار الفرق في
+		// السلوك دليلاً على وجود الحساب من عدمه
+		RecordAccountAttempt(input.Email, false)
 		writeJSON(w, http.StatusUnauthorized, models.APIResponse{
 			Success: false, Message: "بيانات الدخول غير صحيحة",
 		})
@@ -58,6 +69,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(input.Password))
 	if err != nil {
 		middleware.RecordLoginAttempt(clientIP, false)
+		RecordAccountAttempt(input.Email, false)
 		writeJSON(w, http.StatusUnauthorized, models.APIResponse{
 			Success: false, Message: "بيانات الدخول غير صحيحة",
 		})
@@ -66,6 +78,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	// نجاح - إلغاء Rate limit (نفس صيغة IP المستخدمة في تسجيل الفشل)
 	middleware.RecordLoginAttempt(clientIP, true)
+	RecordAccountAttempt(input.Email, true)
 
 	// تحديث آخر تسجيل دخول
 	if _, err := db.DB.Exec("UPDATE users SET last_login = ? WHERE id = ?", time.Now(), user.ID); err != nil {
@@ -89,7 +102,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// تسجيل النشاط
-	logActivity(user.ID, user.Name, "login", nil, nil, "تسجيل دخول")
+	logActivityIP(r, user.ID, user.Name, "login", nil, nil, "تسجيل دخول")
 
 	// توليد JWT
 	dept := ""
@@ -124,13 +137,17 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// إضافة Token للقائمة السوداء (ينتهي بعد 8 ساعات)
-	middleware.BlacklistToken(tokenStr, time.Now().Add(8*time.Hour))
+	// القائمة السوداء: في الذاكرة (سريعة) + في قاعدة البيانات (تنجو من النشر)
+	expiry := time.Now().Add(8 * time.Hour)
+	middleware.BlacklistToken(tokenStr, expiry)
+	if err := RevokeToken(tokenStr, expiry); err != nil {
+		logErr("RevokeToken", err)
+	}
 
 	userID := getUserID(r)
 	var userName string
 	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName)
-	logActivity(userID, userName, "logout", nil, nil, "تسجيل خروج")
+	logActivityIP(r, userID, userName, "logout", nil, nil, "تسجيل خروج")
 
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Message: "تم تسجيل الخروج بنجاح",
@@ -140,6 +157,7 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 // إحصائيات الأمان (للأدمن فقط)
 func GetSecurityStats(w http.ResponseWriter, r *http.Request) {
 	stats := middleware.GetSecurityStats()
+	stats["locked_accounts"] = LockedAccountsCount()
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Data: stats,
 	})
@@ -160,10 +178,8 @@ func ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(input.NewPassword) < 6 {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{
-			Success: false, Message: "كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل",
-		})
+	if msg := validatePassword(input.NewPassword); msg != "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
 		return
 	}
 

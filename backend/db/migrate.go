@@ -28,6 +28,9 @@ func Migrate() error {
 		return fmt.Errorf("ترحيل جدول requests: %w", err)
 	}
 
+	// جداول حالة الأمان الدائمة — CREATE TABLE IF NOT EXISTS في schema.sql
+	// ينشئها تلقائياً على القواعد الجديدة والقائمة معاً، فلا ترحيل إضافياً لها.
+
 	return nil
 }
 

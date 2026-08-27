@@ -30,7 +30,7 @@ var (
 	pdfMagic     = []byte("%PDF-")
 	zipMagic     = []byte("PK\x03\x04")
 	docMagic     = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1} // OLE compound (legacy .doc)
-	docxKeywords = []byte("word/")                                         // يجب أن يحتوي docx على هذا
+	docxKeywords = []byte("word/")                                        // يجب أن يحتوي docx على هذا
 )
 
 // detectFileType يفحص magic bytes ويرفض ZIP عام غير docx
@@ -141,6 +141,28 @@ func ServeFile(w http.ResponseWriter, r *http.Request) {
 	// منع path traversal
 	if strings.Contains(filename, "..") || strings.Contains(filename, "/") {
 		http.Error(w, "غير مسموح", http.StatusForbidden)
+		return
+	}
+
+	// تحقق الملكية: المصادقة وحدها لا تكفي — كان أي مستخدم مسجَّل
+	// ينزّل أي ملف إن عرف اسمه.
+	userID := getUserID(r)
+	role := getUserRole(r)
+	reqID, found := requestIDForFile(filename)
+	if !found {
+		// ملف غير مرتبط بأي طلب: يُسمح لرافعه فقط (اسم الملف يبدأ بمعرّفه)
+		// وللأدوار الإشرافية
+		if !strings.HasPrefix(filename, fmt.Sprintf("%d_", userID)) &&
+			role != "admin" && role != "manager" {
+			writeJSON(w, http.StatusForbidden, models.APIResponse{
+				Success: false, Message: "غير مصرح بالوصول إلى هذا الملف",
+			})
+			return
+		}
+	} else if !canAccessRequest(reqID, userID, role) {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{
+			Success: false, Message: "غير مصرح بالوصول إلى هذا الملف",
+		})
 		return
 	}
 

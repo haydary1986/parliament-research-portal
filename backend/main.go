@@ -40,6 +40,12 @@ func main() {
 		log.Printf("تحذير: %v", err)
 	}
 
+	// القائمة السوداء الدائمة: تُحقن هنا لتفادي دورة استيراد بين
+	// middleware و handlers، وبدونها تعود الرموز الملغاة صالحة بعد كل نشر
+	middleware.RevokedChecker = handlers.IsTokenRevoked
+	handlers.StartTokenCleanup()
+	handlers.PurgeExpiredTokens()
+
 	mux := http.NewServeMux()
 
 	auth := middleware.Auth
@@ -62,6 +68,7 @@ func main() {
 	// =============================================
 	mux.Handle("GET /api/notifications", auth(http.HandlerFunc(handlers.GetNotifications)))
 	mux.Handle("PUT /api/notifications/{id}/read", auth(http.HandlerFunc(handlers.MarkNotificationRead)))
+	mux.Handle("PUT /api/notifications/read-all", auth(http.HandlerFunc(handlers.MarkAllNotificationsRead)))
 	mux.Handle("PUT /api/auth/change-password", auth(http.HandlerFunc(handlers.ChangePassword)))
 
 	// =============================================
@@ -85,8 +92,8 @@ func main() {
 	mux.Handle("PUT /api/requests/{id}/confirm", role("department_head")(http.HandlerFunc(handlers.ConfirmRequest)))
 	// إرجاع الطلب (بحث موجود): المدير فقط
 	mux.Handle("PUT /api/requests/{id}/return", role("manager")(http.HandlerFunc(handlers.ReturnRequest)))
-	// المراجعة النهائية واعتماد البحث (القديم - للحفاظ على التوافق): المدير فقط
-	mux.Handle("PUT /api/requests/{id}/final-review", role("manager")(http.HandlerFunc(handlers.FinalReviewRequest)))
+	// سحب الطلب: الجهة الطالبة، ما دام لم يُحَل بعد
+	mux.Handle("PUT /api/requests/{id}/withdraw", role("deputy")(http.HandlerFunc(handlers.WithdrawRequest)))
 
 	// =============================================
 	// Workflow الجديد (req.md)
@@ -99,8 +106,6 @@ func main() {
 	mux.Handle("PUT /api/requests/{id}/dept-send", role("department_head")(http.HandlerFunc(handlers.DeptHeadSendToDeputy)))
 	// مدير الدائرة يرسل البحث ذا الخصوصية للنائب
 	mux.Handle("PUT /api/requests/{id}/manager-send", role("manager")(http.HandlerFunc(handlers.ManagerSendToDeputy)))
-	// الباحث يحيل البحث للمعاون (مسار قديم — المدقق اللغوي صار يحيل مباشرةً)
-	mux.Handle("PUT /api/research-tasks/{id}/refer-assistant", role("researcher")(http.HandlerFunc(handlers.ReferToAssistant)))
 	// الباحث يربط ملف بمهمة بحثه
 	mux.Handle("PUT /api/research-tasks/{id}/file", role("researcher")(http.HandlerFunc(handlers.AttachResearchFile)))
 	// إعادة إسناد المهمة لباحث بديل: رئيس القسم أو مدير الدائرة
@@ -118,6 +123,8 @@ func main() {
 	mux.Handle("POST /api/users/bulk", role("admin")(http.HandlerFunc(handlers.BulkCreateUsers)))
 	// تفعيل/تعطيل: أدمن + رئيس قسم (لموظفي قسمه)
 	mux.Handle("PUT /api/users/{id}/status", role("admin", "department_head")(http.HandlerFunc(handlers.UpdateUserStatus)))
+	// تعديل بيانات المستخدم: أدمن فقط (الحذف غير مدعوم — التعطيل بديله)
+	mux.Handle("PUT /api/users/{id}", role("admin")(http.HandlerFunc(handlers.UpdateUser)))
 	// إعادة تعيين كلمة مرور أي مستخدم: أدمن فقط
 	mux.Handle("PUT /api/users/{id}/reset-password", role("admin")(http.HandlerFunc(handlers.AdminResetPassword)))
 
@@ -126,6 +133,16 @@ func main() {
 	// =============================================
 	mux.Handle("GET /api/departments", auth(http.HandlerFunc(handlers.GetDepartments)))
 	mux.Handle("GET /api/departments/{id}", auth(http.HandlerFunc(handlers.GetDepartment)))
+	// إدارة الأقسام: أدمن فقط
+	mux.Handle("POST /api/departments", role("admin")(http.HandlerFunc(handlers.CreateDepartment)))
+	mux.Handle("PUT /api/departments/{id}", role("admin")(http.HandlerFunc(handlers.UpdateDepartment)))
+	mux.Handle("DELETE /api/departments/{id}", role("admin")(http.HandlerFunc(handlers.DeleteDepartment)))
+
+	// =============================================
+	// التقارير - Reports (مدير + أدمن)
+	// =============================================
+	mux.Handle("GET /api/reports/operations", role("manager", "admin")(http.HandlerFunc(handlers.GetOperationsReport)))
+	mux.Handle("GET /api/reports/requests-export", role("manager", "admin")(http.HandlerFunc(handlers.ExportRequests)))
 
 	// =============================================
 	// المهام البحثية - Research Tasks

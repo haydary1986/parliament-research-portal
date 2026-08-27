@@ -91,7 +91,6 @@ CREATE TABLE IF NOT EXISTS requests (
         'pending', 'assigned', 'confirmed', 'in_progress', 'review',
         'pending_dept_review', 'proofreading',
         'pending_assistant', 'pending_dept_send', 'pending_manager_send',
-        'under_manager_review',
         'delivered', 'completed', 'returned_exists', 'rejected'
     )),
     -- يبقى للقسم الرئيسي (متوافق مع القديم) - متعدد الأقسام في request_departments
@@ -239,6 +238,31 @@ CREATE TABLE IF NOT EXISTS notifications (
     entity_type TEXT,
     entity_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- الرموز الملغاة - Revoked Tokens
+-- تبقى القائمة السوداء صالحة بعد إعادة التشغيل والنشر،
+-- وإلا عادت الرموز المسجَّل خروجها صالحة عند كل نشر
+-- =============================================
+-- expires_at بالثواني منذ 1970 (لا DATETIME): المقارنة النصية بـ CURRENT_TIMESTAMP
+-- غير موثوقة لأن الدرايفر يكتب RFC3339 بينما CURRENT_TIMESTAMP بصيغة UTC مختلفة
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+    token_hash TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_exp ON revoked_tokens(expires_at);
+
+-- =============================================
+-- محاولات الدخول الفاشلة - Login Attempts
+-- تُستخدم لقفل الحساب (لا الـ IP وحده) ولبقاء الحظر بعد إعادة التشغيل
+-- =============================================
+CREATE TABLE IF NOT EXISTS login_attempts (
+    email TEXT PRIMARY KEY,
+    fail_count INTEGER DEFAULT 0,
+    locked_until DATETIME,
+    last_attempt DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- =============================================

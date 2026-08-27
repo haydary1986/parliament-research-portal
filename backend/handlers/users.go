@@ -188,10 +188,8 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if len(password) < 6 {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{
-			Success: false, Message: "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
-		})
+	if msg := validatePassword(password); msg != "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
 		return
 	}
 	passwordHash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -254,7 +252,7 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	adminID := getUserID(r)
 	var adminName string
 	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", adminID).Scan(&adminName)
-	logActivity(adminID, adminName, "create_user", strPtr("user"), nil, "إنشاء مستخدم جديد: "+input.Name)
+	logActivityIP(r, adminID, adminName, "create_user", strPtr("user"), nil, "إنشاء مستخدم جديد: "+input.Name)
 
 	writeJSON(w, http.StatusCreated, models.APIResponse{
 		Success: true, Message: "تم إنشاء المستخدم بنجاح",
@@ -367,7 +365,7 @@ func BulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 		res.Email = u.Email
 
 		// توليد كلمة مرور عشوائية (10 أحرف من مجموعة آمنة، بدون أحرف ملتبسة)
-		pwd := generateReadablePassword(10)
+		pwd := generateReadablePassword(12)
 		hashed, err := bcrypt.GenerateFromPassword([]byte(pwd), bcrypt.DefaultCost)
 		if err != nil {
 			res.Error = "فشل تشفير كلمة المرور"
@@ -432,7 +430,7 @@ func BulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 		successCount++
 	}
 
-	logActivity(adminID, adminName, "bulk_create_users", strPtr("user"), nil,
+	logActivityIP(r, adminID, adminName, "bulk_create_users", strPtr("user"), nil,
 		fmt.Sprintf("إنشاء %d مستخدم بدفعة واحدة (%d ناجح من %d)", successCount, successCount, len(input.Users)))
 
 	writeJSON(w, http.StatusOK, models.APIResponse{
@@ -467,10 +465,8 @@ func AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "بيانات غير صالحة"})
 		return
 	}
-	if len(input.NewPassword) < 6 {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{
-			Success: false, Message: "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
-		})
+	if msg := validatePassword(input.NewPassword); msg != "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
 		return
 	}
 
@@ -498,7 +494,7 @@ func AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	// تسجيل النشاط
 	var adminName string
 	db.DB.QueryRow("SELECT name FROM users WHERE id = ?", adminID).Scan(&adminName)
-	logActivity(adminID, adminName, "admin_reset_password", strPtr("user"), &targetID,
+	logActivityIP(r, adminID, adminName, "admin_reset_password", strPtr("user"), &targetID,
 		"إعادة تعيين كلمة مرور المستخدم: "+targetName+" ("+targetEmail+")")
 
 	// إشعار المستخدم المتأثر

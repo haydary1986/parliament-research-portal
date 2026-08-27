@@ -74,6 +74,11 @@ func GenerateToken(userID int, role string, departmentID string) (string, error)
 var (
 	blacklistMu sync.RWMutex
 	blacklist   = make(map[string]time.Time) // token -> expiry time
+
+	// RevokedChecker يفحص القائمة السوداء الدائمة في قاعدة البيانات.
+	// تُحقن من الـ handlers في main() لتفادي دورة استيراد،
+	// وبدونها تعود الرموز المسجَّل خروجها صالحة بعد كل نشر.
+	RevokedChecker func(token string) bool
 )
 
 func BlacklistToken(tokenStr string, expiry time.Time) {
@@ -277,8 +282,8 @@ func Auth(next http.Handler) http.Handler {
 
 		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 
-		// فحص القائمة السوداء
-		if IsBlacklisted(tokenStr) {
+		// فحص القائمة السوداء: الذاكرة أولاً (سريع) ثم التخزين الدائم
+		if IsBlacklisted(tokenStr) || (RevokedChecker != nil && RevokedChecker(tokenStr)) {
 			http.Error(w, `{"success":false,"message":"تم تسجيل الخروج. سجّل دخول مجدداً"}`, http.StatusUnauthorized)
 			return
 		}

@@ -98,6 +98,20 @@ type Request struct {
 	Notes                 []Note               `json:"notes,omitempty"`
 	// عدد كتب المخاطبات الرسمية — يُستخدم لإظهار مرحلة «إجراء مخاطبات رسمية» للطالب
 	OfficialLettersCount int `json:"official_letters_count"`
+	// ملفات البحث المرفوعة — تُتاح لكل من يحق له قراءة الطلب
+	// (الجهة الطالبة، فريق القسم، المدقق، المعاون، الإدارة)
+	Files []RequestFile `json:"files,omitempty"`
+}
+
+// RequestFile ملف بحث مرفوع مرتبط بمهمة
+type RequestFile struct {
+	TaskID         string     `json:"task_id"`
+	ResearcherID   int        `json:"researcher_id"`
+	ResearcherName string     `json:"researcher_name"`
+	FilePath       string     `json:"file_path"`
+	TaskStatus     string     `json:"task_status"`
+	SubmittedDate  *time.Time `json:"submitted_date"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // =============================================

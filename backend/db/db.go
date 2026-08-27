@@ -47,8 +47,8 @@ func ResetAdminPasswordIfRequested() error {
 	if newPwd == "" {
 		return nil
 	}
-	if len(newPwd) < 6 {
-		log.Printf("⚠️  ADMIN_PWD_RESET مُعيَّن لكن أقل من 6 أحرف - تجاهل")
+	if len(newPwd) < 10 {
+		log.Printf("⚠️  ADMIN_PWD_RESET مُعيَّن لكن أقل من 10 أحرف - تجاهل")
 		return nil
 	}
 

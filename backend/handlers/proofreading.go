@@ -22,7 +22,8 @@ func GetProofreadingTasks(w http.ResponseWriter, r *http.Request) {
 	query := `
 		SELECT pt.id, pt.research_task_id, pt.proofreader_id, pt.status,
 		       pt.notes, pt.file_path, pt.assigned_date, pt.completed_date,
-		       COALESCE(r.title, ''), COALESCE(u.name, '')
+		       COALESCE(r.title, ''), COALESCE(u.name, ''),
+		       COALESCE(rt.file_path, ''), COALESCE(rt.request_id, '')
 		FROM proofreading_tasks pt
 		LEFT JOIN research_tasks rt ON rt.id = pt.research_task_id
 		LEFT JOIN requests r ON r.id = rt.request_id
@@ -30,9 +31,17 @@ func GetProofreadingTasks(w http.ResponseWriter, r *http.Request) {
 		WHERE 1=1`
 	var args []interface{}
 
-	if role == "proofreader" {
+	switch role {
+	case "proofreader":
 		query += " AND pt.proofreader_id = ?"
 		args = append(args, userID)
+	case "department_head":
+		// رئيس القسم يرى مهام تدقيق باحثي قسمه فقط
+		var deptID sql.NullString
+		logErr("GetProofreadingTasks dept lookup",
+			db.DB.QueryRow("SELECT department_id FROM users WHERE id = ?", userID).Scan(&deptID))
+		query += " AND u.department_id = ?"
+		args = append(args, deptID.String)
 	}
 	if status != "" {
 		query += " AND pt.status = ?"
@@ -54,6 +63,9 @@ func GetProofreadingTasks(w http.ResponseWriter, r *http.Request) {
 		models.ProofreadingTask
 		RequestTitle   string `json:"request_title"`
 		ResearcherName string `json:"researcher_name"`
+		// ملف البحث المطلوب تدقيقه — بدونه كان المدقق يُكلَّف بمستند لا يراه
+		ResearchFile string `json:"research_file"`
+		RequestID    string `json:"request_id"`
 	}
 
 	tasks := []ProofreadingWithDetails{}
@@ -61,7 +73,7 @@ func GetProofreadingTasks(w http.ResponseWriter, r *http.Request) {
 		var t ProofreadingWithDetails
 		if err := rows.Scan(&t.ID, &t.ResearchTaskID, &t.ProofreaderID, &t.Status,
 			&t.Notes, &t.FilePath, &t.AssignedDate, &t.CompletedDate,
-			&t.RequestTitle, &t.ResearcherName); err != nil {
+			&t.RequestTitle, &t.ResearcherName, &t.ResearchFile, &t.RequestID); err != nil {
 			log.Printf("GetProofreadingTasks scan: %v", err)
 			continue
 		}
@@ -187,7 +199,7 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		return logActivityTx(tx, userID, userName, "update_proofreading", strPtr("proofreading_task"), &id,
+		return logActivityTx(tx, r, userID, userName, "update_proofreading", strPtr("proofreading_task"), &id,
 			fmt.Sprintf("تحديث حالة التدقيق إلى %s", input.Status))
 	})
 
@@ -283,7 +295,7 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 				"info", strPtr("proofreading_task"), &ptID); err != nil {
 				return err
 			}
-			return logActivityTx(tx, userID, userName, "dept_review_approve", strPtr("request"), &id, "اعتماد رئيس القسم + إرسال للتدقيق اللغوي")
+			return logActivityTx(tx, r, userID, userName, "dept_review_approve", strPtr("request"), &id, "اعتماد رئيس القسم + إرسال للتدقيق اللغوي")
 		}
 
 		// رفض → يرجع للباحث
@@ -313,7 +325,7 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return logActivityTx(tx, userID, userName, "dept_review_reject", strPtr("request"), &id, "رفض رئيس القسم - إرجاع للباحث")
+		return logActivityTx(tx, r, userID, userName, "dept_review_reject", strPtr("request"), &id, "رفض رئيس القسم - إرجاع للباحث")
 	})
 
 	if txErr != nil {
@@ -363,7 +375,7 @@ func CreateProofreadingTask(w http.ResponseWriter, r *http.Request) {
 			"تم تعيينك لتدقيق بحث جديد", "info", strPtr("proofreading_task"), &ptID); err != nil {
 			return err
 		}
-		return logActivityTx(tx, userID, userName, "create_proofreading", strPtr("proofreading_task"), &ptID, "إنشاء مهمة تدقيق جديدة")
+		return logActivityTx(tx, r, userID, userName, "create_proofreading", strPtr("proofreading_task"), &ptID, "إنشاء مهمة تدقيق جديدة")
 	})
 
 	if txErr != nil {

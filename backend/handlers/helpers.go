@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -119,11 +120,43 @@ func getQueryInt(r *http.Request, key string, defaultVal int) int {
 	return i
 }
 
+// currentIP يستخرج عنوان العميل من سياق الطلب.
+// خلف Cloudflare/Traefik يكون RemoteAddr هو الوسيط، فنقدّم الترويسات الموثوقة.
+func currentIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if v := r.Header.Get("CF-Connecting-IP"); v != "" {
+		return v
+	}
+	if v := r.Header.Get("X-Real-IP"); v != "" {
+		return v
+	}
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		// أول عنوان في السلسلة هو العميل الأصلي
+		if i := strings.Index(v, ","); i > 0 {
+			return strings.TrimSpace(v[:i])
+		}
+		return strings.TrimSpace(v)
+	}
+	return middleware.ExtractIP(r.RemoteAddr)
+}
+
 func logActivity(userID int, userName, action string, entityType, entityID *string, details string) {
+	logActivityIP(nil, userID, userName, action, entityType, entityID, details)
+}
+
+// logActivityIP يسجّل النشاط مع عنوان العميل.
+// عمود ip_address كان يبقى فارغاً دائماً قبل هذا — وهو مطلب تدقيقي أساسي.
+func logActivityIP(r *http.Request, userID int, userName, action string, entityType, entityID *string, details string) {
+	var ip *string
+	if s := currentIP(r); s != "" {
+		ip = &s
+	}
 	_, err := db.DB.Exec(`
-		INSERT INTO activity_logs (user_id, user_name, action, entity_type, entity_id, details)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, userID, userName, action, entityType, entityID, details)
+		INSERT INTO activity_logs (user_id, user_name, action, entity_type, entity_id, details, ip_address)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, userID, userName, action, entityType, entityID, details, ip)
 	logErr("logActivity", err)
 }
 
@@ -136,11 +169,15 @@ func createNotification(userID int, title, message, notifType string, entityType
 }
 
 // logActivityTx + createNotificationTx نسخ تعمل داخل معاملة
-func logActivityTx(tx *sql.Tx, userID int, userName, action string, entityType, entityID *string, details string) error {
+func logActivityTx(tx *sql.Tx, r *http.Request, userID int, userName, action string, entityType, entityID *string, details string) error {
+	var ip *string
+	if s := currentIP(r); s != "" {
+		ip = &s
+	}
 	_, err := tx.Exec(`
-		INSERT INTO activity_logs (user_id, user_name, action, entity_type, entity_id, details)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, userID, userName, action, entityType, entityID, details)
+		INSERT INTO activity_logs (user_id, user_name, action, entity_type, entity_id, details, ip_address)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, userID, userName, action, entityType, entityID, details, ip)
 	if err != nil {
 		return fmt.Errorf("logActivityTx: %w", err)
 	}
@@ -190,6 +227,108 @@ func userDepartmentHandlesRequest(requestID string, userID int) (bool, string) {
 		requestID, userDept.String,
 	).Scan(&n))
 	return n > 0, userDept.String
+}
+
+// canAccessRequest يحدد ما إذا كان للمستخدم حق قراءة طلب ومرفقاته.
+// مصدر حقيقة واحد يستخدمه GetRequest وServeFile معاً.
+//
+//	admin / manager / assistant_manager → كل الطلبات (أدوار إشرافية)
+//	deputy            → طلباته فقط
+//	department_head   → طلبات الأقسام المُحالة إليه
+//	researcher        → الطلبات التي له عليها مهمة
+//	proofreader       → الطلبات التي له عليها مهمة تدقيق
+func canAccessRequest(requestID string, userID int, role string) bool {
+	switch role {
+	case "admin", "manager", "assistant_manager":
+		return true
+
+	case "deputy":
+		var owner sql.NullInt64
+		if err := db.DB.QueryRow("SELECT deputy_id FROM requests WHERE id = ?", requestID).Scan(&owner); err != nil {
+			return false
+		}
+		return owner.Valid && int(owner.Int64) == userID
+
+	case "department_head":
+		allowed, _ := userDepartmentHandlesRequest(requestID, userID)
+		return allowed
+
+	case "researcher":
+		var n int
+		logErr("canAccessRequest researcher", db.DB.QueryRow(
+			"SELECT COUNT(*) FROM research_tasks WHERE request_id = ? AND researcher_id = ?",
+			requestID, userID,
+		).Scan(&n))
+		return n > 0
+
+	case "proofreader":
+		var n int
+		logErr("canAccessRequest proofreader", db.DB.QueryRow(`
+			SELECT COUNT(*) FROM proofreading_tasks pt
+			JOIN research_tasks rt ON rt.id = pt.research_task_id
+			WHERE rt.request_id = ? AND pt.proofreader_id = ?
+		`, requestID, userID).Scan(&n))
+		return n > 0
+	}
+	return false
+}
+
+// requestIDForFile يرجع معرّف الطلب الذي ينتمي إليه ملف مرفوع.
+// يبحث في مهام البحث ومهام التدقيق معاً.
+func requestIDForFile(filename string) (string, bool) {
+	var reqID string
+	err := db.DB.QueryRow(
+		"SELECT request_id FROM research_tasks WHERE file_path = ? LIMIT 1", filename,
+	).Scan(&reqID)
+	if err == nil {
+		return reqID, true
+	}
+	err = db.DB.QueryRow(`
+		SELECT rt.request_id FROM proofreading_tasks pt
+		JOIN research_tasks rt ON rt.id = pt.research_task_id
+		WHERE pt.file_path = ? LIMIT 1
+	`, filename).Scan(&reqID)
+	if err == nil {
+		return reqID, true
+	}
+	return "", false
+}
+
+// =============================================
+// سياسة كلمات المرور
+// =============================================
+
+// MinPasswordLength الحد الأدنى لطول كلمة المرور.
+// رُفع من 6 إلى 10 — ستة أحرف بلا تعقيد قابلة للتخمين على منصة حكومية.
+const MinPasswordLength = 10
+
+// validatePassword يتحقق من الطول والتنوّع.
+// يرجع رسالة عربية عند الفشل، أو "" عند القبول.
+func validatePassword(pw string) string {
+	if len([]rune(pw)) < MinPasswordLength {
+		return fmt.Sprintf("كلمة المرور يجب أن تكون %d أحرف على الأقل", MinPasswordLength)
+	}
+	var hasLetter, hasDigit bool
+	for _, c := range pw {
+		switch {
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+			hasLetter = true
+		}
+	}
+	if !hasLetter || !hasDigit {
+		return "كلمة المرور يجب أن تجمع بين حروف وأرقام"
+	}
+	// كلمات شائعة صريحة
+	weak := map[string]bool{
+		"password12": true, "1234567890": true, "0123456789": true,
+		"parliament": true, "iraq123456": true, "admin12345": true,
+	}
+	if weak[strings.ToLower(pw)] {
+		return "كلمة المرور شائعة جداً — اختر أخرى"
+	}
+	return ""
 }
 
 // =============================================

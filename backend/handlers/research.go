@@ -267,7 +267,7 @@ func UpdateResearchTaskStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		return logActivityTx(tx, userID, userName, "update_research_status", strPtr("research_task"), &id,
+		return logActivityTx(tx, r, userID, userName, "update_research_status", strPtr("research_task"), &id,
 			fmt.Sprintf("تحديث حالة المهمة إلى %s", input.Status))
 	})
 
@@ -357,7 +357,7 @@ func CreateInfoRequest(w http.ResponseWriter, r *http.Request) {
 
 	var userName string
 	logErr("CreateInfoRequest userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
-	logActivity(userID, userName, "create_info_request", strPtr("research_task"), &taskID,
+	logActivityIP(r, userID, userName, "create_info_request", strPtr("research_task"), &taskID,
 		fmt.Sprintf("كتاب رقم %s (محاولة %d/3) إلى %s", number, attempt, sanitize(input.TargetEntity)))
 
 	writeJSON(w, http.StatusCreated, models.APIResponse{
@@ -423,7 +423,7 @@ func UpdateInfoRequestResponse(w http.ResponseWriter, r *http.Request) {
 	if input.Status == "received" {
 		details = fmt.Sprintf("وصل رد الجهة - رقم الكتاب: %s", input.ResponseLetterNumber)
 	}
-	logActivity(userID, userName, "update_info_response", strPtr("research_task"), &taskID, details)
+	logActivityIP(r, userID, userName, "update_info_response", strPtr("research_task"), &taskID, details)
 
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم تحديث حالة الرد"})
 }
@@ -466,7 +466,7 @@ func AttachResearchFile(w http.ResponseWriter, r *http.Request) {
 
 	var userName string
 	logErr("AttachResearchFile userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
-	logActivity(userID, userName, "attach_file", strPtr("research_task"), &id, "ربط ملف البحث: "+input.FilePath)
+	logActivityIP(r, userID, userName, "attach_file", strPtr("research_task"), &id, "ربط ملف البحث: "+input.FilePath)
 
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم رفع الملف بنجاح"})
 }
@@ -588,7 +588,7 @@ func ReassignResearchTask(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		return logActivityTx(tx, userID, userName, "reassign_research_task", strPtr("research_task"), &id, handoverNote)
+		return logActivityTx(tx, r, userID, userName, "reassign_research_task", strPtr("research_task"), &id, handoverNote)
 	})
 
 	if txErr != nil {
@@ -600,76 +600,6 @@ func ReassignResearchTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true, Message: fmt.Sprintf("تم نقل المهمة إلى %s", newName),
 	})
-}
-
-// PUT /api/research-tasks/{id}/refer-assistant - الباحث يحيل للمعاون للتدقيق النهائي
-// (نقطة 4 من بوابة الباحث في req.md)
-func ReferToAssistant(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	userID := getUserID(r)
-
-	var assignedResearcher int
-	var requestID string
-	if err := db.DB.QueryRow("SELECT researcher_id, request_id FROM research_tasks WHERE id = ?", id).Scan(&assignedResearcher, &requestID); err != nil {
-		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المهمة غير موجودة"})
-		return
-	}
-	if assignedResearcher != userID {
-		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بهذه العملية"})
-		return
-	}
-
-	// يجب أن يكون التدقيق اللغوي قد انتهى أولاً
-	var reqStatus string
-	logErr("ReferToAssistant status", db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", requestID).Scan(&reqStatus))
-	if reqStatus != "proofreading" && reqStatus != "in_progress" {
-		writeJSON(w, http.StatusBadRequest, models.APIResponse{
-			Success: false, Message: "لا يمكن الإحالة إلى المعاون قبل إكمال التدقيق اللغوي",
-		})
-		return
-	}
-
-	var userName string
-	logErr("ReferToAssistant userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
-
-	txErr := withTx(func(tx *sql.Tx) error {
-		now := time.Now()
-		if _, err := tx.Exec("UPDATE requests SET status = 'pending_assistant', updated_at = ? WHERE id = ?", now, requestID); err != nil {
-			return fmt.Errorf("UPDATE requests: %w", err)
-		}
-
-		// إشعار كل المعاونين النشطين
-		rows, err := tx.Query("SELECT id FROM users WHERE role = 'assistant_manager' AND status = 'active'")
-		if err != nil {
-			return fmt.Errorf("lookup assistants: %w", err)
-		}
-		var assistants []int
-		for rows.Next() {
-			var aid int
-			if rows.Scan(&aid) == nil {
-				assistants = append(assistants, aid)
-			}
-		}
-		rows.Close()
-		for _, aid := range assistants {
-			if err := createNotificationTx(tx, aid, "بحث جاهز للتدقيق النهائي",
-				fmt.Sprintf("الباحث أحال الطلب %s إليكم للتدقيق النهائي", requestID),
-				"info", strPtr("request"), &requestID); err != nil {
-				return err
-			}
-		}
-
-		return logActivityTx(tx, userID, userName, "refer_to_assistant", strPtr("research_task"), &id,
-			"إحالة البحث للمعاون للتدقيق النهائي")
-	})
-
-	if txErr != nil {
-		log.Printf("ReferToAssistant tx failed: %v", txErr)
-		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل الإحالة"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تمت الإحالة إلى المعاون"})
 }
 
 // PUT /api/requests/{id}/assistant-review - المعاون يدقق نهائياً
@@ -786,7 +716,7 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 			if nextStatus == "pending_manager_send" {
 				details = "اعتماد المعاون النهائي (بحث ذو خصوصية → مدير الدائرة)"
 			}
-			return logActivityTx(tx, userID, userName, "assistant_approve", strPtr("request"), &id, details)
+			return logActivityTx(tx, r, userID, userName, "assistant_approve", strPtr("request"), &id, details)
 		}
 
 		// رفض: يرجع للباحث
@@ -824,7 +754,7 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		return logActivityTx(tx, userID, userName, "assistant_reject", strPtr("request"), &id, "رفض المعاون - إرجاع للباحث")
+		return logActivityTx(tx, r, userID, userName, "assistant_reject", strPtr("request"), &id, "رفض المعاون - إرجاع للباحث")
 	})
 
 	if txErr != nil {
@@ -857,7 +787,7 @@ func DeptHeadSendToDeputy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deliverToDeputy(w, id, userID, "dept_send_to_deputy", "إرسال البحث المعتمد للنائب")
+	deliverToDeputy(w, r, id, userID, "dept_send_to_deputy", "إرسال البحث المعتمد للنائب")
 }
 
 // PUT /api/requests/{id}/manager-send - مدير الدائرة يرسل البحث ذا الخصوصية للنائب
@@ -878,13 +808,13 @@ func ManagerSendToDeputy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deliverToDeputy(w, id, userID, "manager_send_to_deputy", "إرسال البحث ذي الخصوصية للنائب عبر مدير الدائرة")
+	deliverToDeputy(w, r, id, userID, "manager_send_to_deputy", "إرسال البحث ذي الخصوصية للنائب عبر مدير الدائرة")
 }
 
 // deliverToDeputy المنطق المشترك لتسليم البحث للنائب:
 // تحديث الحالة إلى delivered + إشعار النائب (وSMS) + طلب موافقة الأرشفة من الباحثين.
 // المستدعي مسؤول عن التحقق من الحالة والصلاحية قبل الاستدعاء.
-func deliverToDeputy(w http.ResponseWriter, id string, userID int, action, details string) {
+func deliverToDeputy(w http.ResponseWriter, r *http.Request, id string, userID int, action, details string) {
 	var userName string
 	logErr("deliverToDeputy userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
 
@@ -913,8 +843,10 @@ func deliverToDeputy(w http.ResponseWriter, id string, userID int, action, detai
 			}
 		}
 		if deputyPhone.Valid && deputyPhone.String != "" {
-			// hook لإشعار SMS — حالياً log فقط (تكامل SMS gateway مستقبلي)
-			log.Printf("📱 SMS إشعار اكتمال البحث للنائب: %s — الطلب %s", deputyPhone.String, id)
+			// إشعار الموبايل (req.md - بوابة النواب نقطة 4).
+			// يُرسل في الخلفية مع إعادة محاولة، فلا يفشل التسليم إن تعطّل المزوّد.
+			SendSMS(deputyPhone.String, fmt.Sprintf(
+				"مجلس النواب العراقي — دائرة البحوث والدراسات: اكتملت الخدمة البحثية لطلبكم %s وتم تسليمها عبر المنصة.", id))
 		}
 
 		// إشعار الباحث(ين) لأخذ موافقتهم على الأرشفة
@@ -942,7 +874,7 @@ func deliverToDeputy(w http.ResponseWriter, id string, userID int, action, detai
 			}
 		}
 
-		return logActivityTx(tx, userID, userName, action, strPtr("request"), &id, details)
+		return logActivityTx(tx, r, userID, userName, action, strPtr("request"), &id, details)
 	})
 
 	if txErr != nil {
@@ -1015,7 +947,7 @@ func UpdateArchiveConsent(w http.ResponseWriter, r *http.Request) {
 		if input.Consent == "approved" {
 			details = "موافقة على إرسال البحث للمستودع الرقمي"
 		}
-		return logActivityTx(tx, userID, userName, "archive_consent", strPtr("research_task"), &id, details)
+		return logActivityTx(tx, r, userID, userName, "archive_consent", strPtr("research_task"), &id, details)
 	})
 
 	if txErr != nil {
