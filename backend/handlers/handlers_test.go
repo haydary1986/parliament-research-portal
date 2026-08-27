@@ -233,3 +233,71 @@ func TestAccountLockout(t *testing.T) {
 		t.Error("الدخول الناجح يجب أن يفك القفل")
 	}
 }
+
+// =============================================
+// التحقّق من القيم المقيَّدة بـ CHECK في المخطط
+//
+// هذه الأعمدة كانت تُمرَّر للقاعدة بلا تحقّق، فينفجر القيد داخل INSERT
+// ويعود 500 غامض بدل 400 مفهومة. الاختبارات تقفل الثغرة.
+// =============================================
+
+func TestNormalizePurpose(t *testing.T) {
+	cases := []struct {
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{"oversight", "oversight", true},
+		{"legislative", "legislative", true},
+		{"other", "other", true},
+		{"", "other", true},      // اختياري في النموذج
+		{"  ", "other", true},    // فراغات فقط
+		{"فحص", "", false},       // القيمة التي كانت تُنتج 500
+		{"OVERSIGHT", "", false}, // حساس لحالة الأحرف
+		{"'; DROP TABLE requests--", "", false},
+	}
+	for _, c := range cases {
+		got, ok := normalizePurpose(c.in)
+		if ok != c.wantOK || (ok && got != c.want) {
+			t.Errorf("normalizePurpose(%q) = (%q, %v)، المتوقع (%q, %v)", c.in, got, ok, c.want, c.wantOK)
+		}
+	}
+}
+
+func TestValidateCommittees(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantBad string
+	}{
+		{"لجنة الأمن والدفاع", ""},
+		{"اللجنة المالية", ""},
+		{"أخرى", ""},
+		{"", ""}, // الفارغ يُملأ من سجل المستخدم
+		{"لجنة الأمن والدفاع، اللجنة المالية", ""},       // صيغة الواجهة متعددة اللجان
+		{"لجنة الأمن والدفاع، لجنة وهمية", "لجنة وهمية"}, // واحدة صحيحة وأخرى لا
+		{"لجنة غير موجودة", "لجنة غير موجودة"},
+		{"<script>alert(1)</script>", "<script>alert(1)</script>"},
+	}
+	for _, c := range cases {
+		if got := validateCommittees(c.in); got != c.wantBad {
+			t.Errorf("validateCommittees(%q) = %q، المتوقع %q", c.in, got, c.wantBad)
+		}
+	}
+}
+
+func TestValidateConfirmation(t *testing.T) {
+	if msg := validateConfirmation("دراسة", "علمي", 30); msg != "" {
+		t.Errorf("قيم صحيحة رُفضت: %s", msg)
+	}
+	if msg := validateConfirmation("بحث", "علمي", 30); msg == "" {
+		t.Error("نوع خدمة غير معتمد قُبل — كان ينتج 500 عند الإحالة")
+	}
+	if msg := validateConfirmation("دراسة", "عام", 30); msg == "" {
+		t.Error("تصنيف غير معتمد قُبل — كان ينتج 500 عند الإحالة")
+	}
+	for _, d := range []int{0, -5, 366, 100000} {
+		if msg := validateConfirmation("دراسة", "علمي", d); msg == "" {
+			t.Errorf("مدة إنجاز غير منطقية قُبلت: %d", d)
+		}
+	}
+}

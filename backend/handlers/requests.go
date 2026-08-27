@@ -756,6 +756,11 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		// القيمتان مقيَّدتان بـ CHECK في المخطط — نتحقّق هنا لنعيد 400 مفهومة
+		if msg := validateConfirmation(input.ServiceType, input.Classification, input.CompletionDays); msg != "" {
+			writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
+			return
+		}
 		if input.CompletionDays < 1 || input.CompletionDays > 365 {
 			writeJSON(w, http.StatusBadRequest, models.APIResponse{
 				Success: false, Message: "مدة الإنجاز يجب أن تكون بين 1 و 365 يوماً",
@@ -1026,6 +1031,11 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 
 	if input.ServiceType == "" || input.Classification == "" || len(researchers) == 0 {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "يرجى تعبئة نوع الخدمة والتصنيف وباحث واحد على الأقل"})
+		return
+	}
+	// القيمتان مقيَّدتان بـ CHECK في المخطط — نتحقّق هنا لنعيد 400 مفهومة
+	if msg := validateConfirmation(input.ServiceType, input.Classification, input.CompletionDays); msg != "" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
 		return
 	}
 	if input.CompletionDays < 1 || input.CompletionDays > 365 {

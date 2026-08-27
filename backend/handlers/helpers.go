@@ -342,6 +342,34 @@ const (
 	ConfidentialityConfidential = "confidential"
 )
 
+// أنواع الخدمة والتصنيفات — مطابقة لقيود CHECK على request_confirmations.
+// كانت تُفحص للفراغ فقط ثم تُمرَّر للقاعدة، فأي قيمة أخرى تُفجّر القيد
+// داخل INSERT ويعود 500 «فشل إحالة الطلب» بلا بيان السبب.
+var ServiceTypes = map[string]bool{
+	"دراسة": true, "تقرير": true, "ورقة إحاطة": true,
+	"بيان رأي": true, "سؤال نيابي": true,
+}
+
+var Classifications = map[string]bool{
+	"علمي": true, "اجتماعي": true, "سياسي": true,
+	"قانوني": true, "مالية واقتصادية": true,
+}
+
+// validateConfirmation يتحقّق من نوع الخدمة والتصنيف ومدة الإنجاز.
+// يرجع رسالة الخطأ، أو "" إن كانت المدخلات صحيحة.
+func validateConfirmation(serviceType, classification string, days int) string {
+	if !ServiceTypes[serviceType] {
+		return "نوع الخدمة غير معتمد"
+	}
+	if !Classifications[classification] {
+		return "التصنيف غير معتمد"
+	}
+	if days < 1 || days > 365 {
+		return "مدة الإنجاز يجب أن تكون بين يوم و365 يوماً"
+	}
+	return ""
+}
+
 // أغراض الطلب — مطابقة لقيد CHECK على عمود requests.purpose.
 // كان الحقل يُمرَّر للقاعدة بلا تحقّق، فتنفجر قيود CHECK داخل INSERT
 // ويعود 500 غامض بدل 400 برسالة مفهومة.
