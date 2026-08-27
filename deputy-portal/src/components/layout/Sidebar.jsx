@@ -1,14 +1,14 @@
-import Brand from './Brand'
+import CouncilLogo from '../national/CouncilLogo'
 import { IconLogout, IconX } from '../icons/Icons'
 
 export default function Sidebar({ items, activeKey, onNavigate, user, onLogout, portalLabel, isOpen, onClose }) {
   return (
     <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
       <div className="sidebar-brand">
-        <Brand size={42} />
+        <CouncilLogo size={44} className="flex-shrink-0" alt="" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-white leading-tight">مجلس النواب العراقي</p>
-          <p className="text-[11px] text-[var(--color-gold-300)] mt-0.5">دائرة البحوث والدراسات</p>
+          <p className="text-[11px] text-[var(--color-gold-300)] mt-0.5">دائرة البحوث والدراسات النيابية</p>
         </div>
         {/* زر إغلاق للهاتف فقط */}
         {onClose && (

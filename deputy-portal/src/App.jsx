@@ -160,7 +160,7 @@ function LoginPage({ onSuccess }) {
 
           <div className="flex items-center justify-center gap-2 sm:gap-3 mt-2">
             <span aria-hidden="true" className="h-px w-10 sm:w-20 bg-gradient-to-l from-[var(--color-gold-500)] to-transparent" />
-            <p className="text-sm sm:text-base font-semibold text-[var(--color-gold-300)]">دائرة البحوث والدراسات</p>
+            <p className="text-sm sm:text-base font-semibold text-[var(--color-gold-300)]">دائرة البحوث والدراسات النيابية</p>
             <span aria-hidden="true" className="h-px w-10 sm:w-20 bg-gradient-to-r from-[var(--color-gold-500)] to-transparent" />
           </div>
 

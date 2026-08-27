@@ -1,8 +1,16 @@
-// شعار مجلس النواب العراقي (ختم الدائرة الإعلامية)
+// شعار مجلس النواب العراقي — الشعار المعتمد في المنصة
 // المصدر: Wikimedia Commons — ملف:شعاربرلماني.png — رخصة CC BY-SA 4.0
-// ملاحظة: صورة نقطية 400×400، لا تُستخدم بأحجام صغيرة (<80px) لأن النص يصبح غير مقروء.
-// للأحجام الصغيرة استخدم StateEmblem بدلاً منه.
-export default function CouncilLogo({ size = 128, className = '', glow = false }) {
+//
+// نسختان بحجمين: الأصل 400×400 (251KB) للعرض الكبير في صفحة الدخول،
+// ونسخة 96×96 (22KB) للسايدبار — يظهر بـ42px في كل صفحة، فشحن الأصل
+// معه هدر بلا فائدة بصرية.
+const FULL_SRC = '/national/council-logo.png'
+const COMPACT_SRC = '/national/council-logo-96.png'
+
+export default function CouncilLogo({ size = 128, className = '', glow = false, alt }) {
+  // النسخة المصغَّرة تكفي حتى 96px عرضاً (192px على شاشات 2x)
+  const src = size <= 96 ? COMPACT_SRC : FULL_SRC
+
   return (
     <div
       className={`relative flex items-center justify-center ${className}`}
@@ -16,8 +24,8 @@ export default function CouncilLogo({ size = 128, className = '', glow = false }
         />
       )}
       <img
-        src="/national/council-logo.png"
-        alt="شعار مجلس النواب العراقي"
+        src={src}
+        alt={alt ?? 'شعار مجلس النواب العراقي'}
         width={size}
         height={size}
         className="relative w-full h-full object-contain"

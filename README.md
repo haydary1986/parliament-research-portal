@@ -3,7 +3,7 @@
 # 🏛️ منصة البحوث البرلمانية
 ### Iraqi Parliament Research Portal
 
-**نظام إدارة الطلبات البحثية لمجلس النواب العراقي - دائرة البحوث والدراسات**
+**نظام إدارة الطلبات البحثية لمجلس النواب العراقي - دائرة البحوث والدراسات النيابية**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-gold.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go)](https://golang.org)
