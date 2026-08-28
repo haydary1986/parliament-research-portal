@@ -262,10 +262,17 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
     setCommittees((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])
   }
 
+  // قفل متزامن عبر ref: setBusy حالة React غير متزامنة، فالضغط المزدوج
+  // (double-click/tap) يمرّ نداءان قبل إعادة الرندر التي تُعطّل الزر —
+  // فيُنشأ طلبان متطابقان. الـ ref يُفحص ويُضبط فوراً في نفس الدورة.
+  const submitting = useRef(false)
+
   const submit = async (e) => {
     e.preventDefault()
+    if (submitting.current) return
     if (title.length < 5) return toast.error('العنوان قصير جداً')
     if (committees.length === 0) return toast.error('يرجى اختيار لجنة واحدة على الأقل')
+    submitting.current = true
     setBusy(true)
     try {
       // نرسل اللجنة الأولى كرئيسية (للتوافق). الـ backend الحالي يخزن committee واحدة
@@ -279,7 +286,7 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
       onCreated()
     } catch (err) {
       toast.error(err.message || 'فشل تقديم الطلب')
-    } finally { setBusy(false) }
+    } finally { submitting.current = false; setBusy(false) }
   }
 
   return (

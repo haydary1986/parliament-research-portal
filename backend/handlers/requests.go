@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -1013,6 +1014,21 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// حارس الحالة: التأكيد يصحّ فقط على طلب في حالة الإحالة. بدونه كان
+	// التأكيد الثاني (نقرة مزدوجة، أو رئيس قسم آخر في إحالة متعددة الأقسام)
+	// يصطدم بقيد UNIQUE على request_confirmations فيعود 500 غامض.
+	var confirmStatus string
+	if err := db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&confirmStatus); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
+		return
+	}
+	if confirmStatus != "assigned" {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "لا يمكن تأكيد الطلب — قد يكون أُكِّد مسبقاً أو تجاوز مرحلة الإحالة",
+		})
+		return
+	}
+
 	var input models.ConfirmRequestInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{
@@ -1065,6 +1081,10 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 			INSERT INTO request_confirmations (request_id, service_type, classification, completion_days, confirmed_by)
 			VALUES (?, ?, ?, ?, ?)
 		`, id, input.ServiceType, input.Classification, input.CompletionDays, userID); err != nil {
+			// تأكيد متزامن سبق: قيد UNIQUE — نعيده 409 لا 500
+			if isUniqueViolation(err) {
+				return errStateConflict
+			}
 			return fmt.Errorf("INSERT confirmation: %w", err)
 		}
 
@@ -1080,11 +1100,15 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 			createdTasks = append(createdTasks, assignedTask{taskID, rid})
 		}
 
-		if _, err := tx.Exec(
-			"UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?",
+		res, err := tx.Exec(
+			"UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ? AND status = 'assigned'",
 			now, id,
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errStateConflict
 		}
 
 		details := "تأكيد الطلب وتعيين باحث"
@@ -1107,6 +1131,12 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "تم تأكيد هذا الطلب مسبقاً",
+		})
+		return
+	}
 	if txErr != nil {
 		log.Printf("ConfirmRequest tx failed: %v", txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{

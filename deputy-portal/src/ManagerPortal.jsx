@@ -395,17 +395,20 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
     setReviewNotes('')
     setAssignResearchers([])
     setEditOpen(false)
+    // علم cancelled: يمنع ردّ طلبٍ سابق بطيء من دهس تفاصيل طلبٍ فُتح بعده،
+    // فيرى المدير محتوى طلب غير الذي يظنّه معروضاً
+    let cancelled = false
     api.getRequest(request.id)
       .then((r) => {
-        if (r.success) {
-          setDetail(r.data)
-          // pre-check الأقسام المُحالة سابقاً ليرى المدير حالتها الحالية
-          const existing = r.data?.assigned_departments || []
-          setSelectedDepts(existing.length > 0 ? existing : [])
-        }
+        if (cancelled || !r.success) return
+        setDetail(r.data)
+        // pre-check الأقسام المُحالة سابقاً ليرى المدير حالتها الحالية
+        const existing = r.data?.assigned_departments || []
+        setSelectedDepts(existing.length > 0 ? existing : [])
       })
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [request])
 
   if (!request) return null

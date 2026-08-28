@@ -162,15 +162,18 @@ function ReviewModal({ request, onClose, onChanged }) {
     setLoading(true)
     setDecision('approve')
     setNotes('')
+    // علم cancelled: يمنع ردّ طلبٍ سابق من دهس تفاصيل طلبٍ فُتح بعده —
+    // حرِج هنا لأن المعاون يقرّر «اعتماد/رفض» بناءً على المحتوى المعروض
+    let cancelled = false
     api.getRequest(request.id)
       .then((r) => {
-        if (r.success) {
-          setDetail(r.data)
-          // نبدأ من تصنيف الجهة الطالبة، ويستطيع المعاون تعديله
-          setConfidentiality(r.data.confidentiality || 'public')
-        }
+        if (cancelled || !r.success) return
+        setDetail(r.data)
+        // نبدأ من تصنيف الجهة الطالبة، ويستطيع المعاون تعديله
+        setConfidentiality(r.data.confidentiality || 'public')
       })
-      .catch(() => {}).finally(() => setLoading(false))
+      .catch(() => {}).finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [request])
 
   if (!request) return null

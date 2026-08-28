@@ -25,6 +25,31 @@ func ExtractIP(remoteAddr string) string {
 	return host
 }
 
+// ClientIP يعيد عنوان العميل الحقيقي من ترويسات Cloudflare/الوكيل.
+//
+// خلف Cloudflare يشترك كل المستخدمين في IP-أصل واحد (RemoteAddr)، فكان
+// الحظر التصاعدي بالـIP يقفل تسجيل الدخول على الجميع: ٣ محاولات فاشلة لأي
+// حساب تحجب الصفحة عن كل المستخدمين. الاعتماد على CF-Connecting-IP يجعل
+// الحظر لكل عميل حقيقي على حدة.
+func ClientIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if v := r.Header.Get("CF-Connecting-IP"); v != "" {
+		return v
+	}
+	if v := r.Header.Get("X-Real-IP"); v != "" {
+		return v
+	}
+	if v := r.Header.Get("X-Forwarded-For"); v != "" {
+		if i := strings.Index(v, ","); i > 0 {
+			return strings.TrimSpace(v[:i])
+		}
+		return strings.TrimSpace(v)
+	}
+	return ExtractIP(r.RemoteAddr)
+}
+
 type contextKey string
 
 const UserIDKey contextKey = "user_id"
@@ -211,7 +236,7 @@ var (
 
 func RateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := ExtractIP(r.RemoteAddr)
+		ip := ClientIP(r)
 		rateMu.Lock()
 		blockUntil, blocked := loginBlock[ip]
 		rateMu.Unlock()

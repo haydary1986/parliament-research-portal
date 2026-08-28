@@ -63,7 +63,7 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 	user.DepartmentID = deptID
 
-	clientIP := middleware.ExtractIP(r.RemoteAddr)
+	clientIP := middleware.ClientIP(r)
 
 	// التحقق من كلمة المرور عبر bcrypt فقط
 	err = bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(input.Password))

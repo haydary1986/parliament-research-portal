@@ -49,6 +49,9 @@ server {
     listen 80;
     server_name _;
 
+    # إخفاء إصدار nginx — كان يُكشف في جسم صفحات الخطأ (مثل 413)
+    server_tokens off;
+
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header X-XSS-Protection "1; mode=block" always;

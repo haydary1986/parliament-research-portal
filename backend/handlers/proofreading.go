@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -116,6 +117,26 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// حارس آلة الحالات: بدونه كان تكرار «إتمام التدقيق» (نقرة مزدوجة/رجوع
+	// المتصفح) بعد أن تجاوز الطلب مرحلته يُعيد الطلب إلى pending_assistant
+	// ويُرجع مهمة الباحث إلى submitted — تلف صامت بإجراء عادي واحد.
+	allowedProofFrom := map[string][]string{
+		"in_progress": {"pending"},
+		"completed":   {"in_progress"},
+		"returned":    {"in_progress"},
+	}
+	var currentProofStatus string
+	if err := db.DB.QueryRow("SELECT status FROM proofreading_tasks WHERE id = ?", id).Scan(&currentProofStatus); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المهمة غير موجودة"})
+		return
+	}
+	if currentProofStatus == input.Status || !transitionAllowed(allowedProofFrom, input.Status, currentProofStatus) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "لا يمكن تنفيذ هذا الإجراء على مهمة التدقيق في حالتها الحالية",
+		})
+		return
+	}
+
 	cleanNotes := sanitizePtr(input.Notes)
 
 	var userName string
@@ -126,11 +147,17 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 
 		switch input.Status {
 		case "completed":
-			if _, err := tx.Exec(`
+			// AND status='in_progress' + فحص RowsAffected لأمان التزامن:
+			// لو مرّ نداءان الفحص المسبق معاً، ينجح أوّلهما فقط
+			res, err := tx.Exec(`
 				UPDATE proofreading_tasks SET status = ?, notes = ?, completed_date = ?, updated_at = ?
-				WHERE id = ?
-			`, input.Status, cleanNotes, now, now, id); err != nil {
+				WHERE id = ? AND status = 'in_progress'
+			`, input.Status, cleanNotes, now, now, id)
+			if err != nil {
 				return fmt.Errorf("UPDATE proofreading: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return errStateConflict
 			}
 
 			var rtID, reqID string
@@ -180,10 +207,14 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 			}
 
 		case "returned":
-			if _, err := tx.Exec(`
-				UPDATE proofreading_tasks SET status = ?, notes = ?, updated_at = ? WHERE id = ?
-			`, input.Status, cleanNotes, now, id); err != nil {
+			res, err := tx.Exec(`
+				UPDATE proofreading_tasks SET status = ?, notes = ?, updated_at = ? WHERE id = ? AND status = 'in_progress'
+			`, input.Status, cleanNotes, now, id)
+			if err != nil {
 				return fmt.Errorf("UPDATE proofreading: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return errStateConflict
 			}
 			var rtID string
 			if err := tx.QueryRow("SELECT research_task_id FROM proofreading_tasks WHERE id = ?", id).Scan(&rtID); err != nil {
@@ -214,6 +245,12 @@ func UpdateProofreadingStatus(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("تحديث حالة التدقيق إلى %s", input.Status))
 	})
 
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "تغيّرت حالة المهمة، يرجى تحديث الصفحة",
+		})
+		return
+	}
 	if txErr != nil {
 		log.Printf("UpdateProofreadingStatus tx failed: %v", txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تحديث الحالة"})
@@ -274,9 +311,14 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 		now := time.Now()
 
 		if input.Decision == "approve" {
-			// نقل الطلب إلى proofreading + إنشاء مهمة تدقيق
-			if _, err := tx.Exec("UPDATE requests SET status = 'proofreading', updated_at = ? WHERE id = ?", now, id); err != nil {
+			// نقل الطلب إلى proofreading + إنشاء مهمة تدقيق — بحارس الحالة
+			// لأمان التزامن: نقرتان على «اعتماد» لا تُنشئان مهمتَي تدقيق
+			res, err := tx.Exec("UPDATE requests SET status = 'proofreading', updated_at = ? WHERE id = ? AND status = 'pending_dept_review'", now, id)
+			if err != nil {
 				return fmt.Errorf("UPDATE requests: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return errStateConflict
 			}
 
 			// إنشاء proofreading_task لأحدث research_task مكتملة (المسلَّمة)
@@ -310,8 +352,12 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// رفض → يرجع للباحث
-		if _, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?", now, id); err != nil {
+		res, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ? AND status = 'pending_dept_review'", now, id)
+		if err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errStateConflict
 		}
 		// المهمة تعود «مُرجَعة» كما في مسار إرجاع المدقق اللغوي.
 		// كانت تبقى 'submitted' فتختفي من «مهامي النشطة» لدى الباحث
@@ -348,6 +394,12 @@ func DeptHeadReviewSubmission(w http.ResponseWriter, r *http.Request) {
 		return logActivityTx(tx, r, userID, userName, "dept_review_reject", strPtr("request"), &id, "رفض رئيس القسم - إرجاع للباحث")
 	})
 
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "تغيّرت حالة الطلب، يرجى تحديث الصفحة",
+		})
+		return
+	}
 	if txErr != nil {
 		log.Printf("DeptHeadReviewSubmission tx failed: %v", txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تسجيل القرار"})

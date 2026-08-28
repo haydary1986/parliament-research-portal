@@ -265,16 +265,21 @@ func DeleteDepartment(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	adminID := getUserID(r)
 
-	var users, requests int
+	var users, requests, referrals int
 	logErr("DeleteDepartment users", db.DB.QueryRow(
 		"SELECT COUNT(*) FROM users WHERE department_id = ?", id).Scan(&users))
 	logErr("DeleteDepartment requests", db.DB.QueryRow(
 		"SELECT COUNT(*) FROM requests WHERE assigned_department = ?", id).Scan(&requests))
+	// جدول الإحالة متعددة الأقسام: القسم قد يكون هدفاً ثانوياً لطلب مفتوح.
+	// بدون هذا الفحص كان الحذف يسري ثم يُسقط ON DELETE CASCADE صفَّ الإحالة،
+	// فيفقد رئيس القسم الوصول لطلبٍ يعمل عليه بلا أثر واضح.
+	logErr("DeleteDepartment referrals", db.DB.QueryRow(
+		"SELECT COUNT(*) FROM request_departments WHERE department_id = ?", id).Scan(&referrals))
 
-	if users > 0 || requests > 0 {
+	if users > 0 || requests > 0 || referrals > 0 {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{
 			Success: false,
-			Message: fmt.Sprintf("لا يمكن حذف القسم: مرتبط بـ %d مستخدم و %d طلب", users, requests),
+			Message: fmt.Sprintf("لا يمكن حذف القسم: مرتبط بـ %d مستخدم و %d طلب و %d إحالة", users, requests, referrals),
 		})
 		return
 	}

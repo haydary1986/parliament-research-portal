@@ -334,7 +334,13 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
     setSelectedResearchers([])
     setReviewNotes('')
     setReviewProofreader('')
-    api.getRequest(request.id).then((r) => { if (r.success) setDetail(r.data) }).catch(() => {}).finally(() => setLoading(false))
+    // علم cancelled: يمنع ردّ طلبٍ سابق من دهس تفاصيل طلبٍ فُتح بعده
+    let cancelled = false
+    api.getRequest(request.id)
+      .then((r) => { if (!cancelled && r.success) setDetail(r.data) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [request])
 
   if (!request) return null

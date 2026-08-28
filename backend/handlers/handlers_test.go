@@ -379,3 +379,37 @@ func TestCurrentAccountReflectsStatus(t *testing.T) {
 		t.Error("مستخدم غير موجود عُدّ نشطاً")
 	}
 }
+
+// =============================================
+// حارس آلة الحالات (اكتُشف بمراجعة منطق الخادم)
+//
+// بدون الحارس كانت إعادة إرسال إجراء (نقرة مزدوجة/رجوع المتصفح) تُرجِع
+// طلباً مُسلَّماً إلى مرحلة سابقة — تلف صامت بإجراء عادي واحد.
+// =============================================
+
+func TestTransitionAllowed(t *testing.T) {
+	allowed := map[string][]string{
+		"in_progress":         {"assigned", "returned"},
+		"submitted":           {"in_progress", "returned"},
+		"sent_to_proofreader": {"submitted"},
+	}
+	cases := []struct {
+		target, current string
+		want            bool
+	}{
+		{"in_progress", "assigned", true},   // بدء العمل
+		{"in_progress", "returned", true},   // استئناف بعد الإرجاع
+		{"submitted", "in_progress", true},  // تسليم عادي
+		{"submitted", "returned", true},     // إعادة تسليم بعد الإرجاع
+		{"submitted", "submitted", false},   // إعادة تسليم مهمة مُسلَّمة — يُمنع
+		{"submitted", "completed", false},   // تسليم مهمة مكتملة — يُمنع
+		{"in_progress", "submitted", false}, // رجوع للخلف — يُمنع
+		{"sent_to_proofreader", "assigned", false},
+		{"submitted", "unknown-state", false},
+	}
+	for _, c := range cases {
+		if got := transitionAllowed(allowed, c.target, c.current); got != c.want {
+			t.Errorf("transitionAllowed(%q ← %q) = %v، المتوقع %v", c.target, c.current, got, c.want)
+		}
+	}
+}

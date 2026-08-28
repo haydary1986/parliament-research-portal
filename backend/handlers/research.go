@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -200,22 +201,54 @@ func UpdateResearchTaskStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// حارس آلة الحالات: المصادر المسموحة لكل حالة هدف. بدونه كانت إعادة
+	// إرسال الباحث (نقرة مزدوجة/رجوع المتصفح) لمهمة تجاوزت مرحلتها تُرجِع
+	// الطلب المُسلَّم إلى pending_dept_review — تلف صامت بإجراء عادي واحد.
+	allowedTaskFrom := map[string][]string{
+		"in_progress":         {"assigned", "returned"},
+		"submitted":           {"in_progress", "returned"},
+		"sent_to_proofreader": {"submitted"},
+		"completed":           {"submitted", "sent_to_proofreader"},
+		"returned":            {"submitted", "sent_to_proofreader"},
+	}
+	var currentStatus string
+	if err := db.DB.QueryRow("SELECT status FROM research_tasks WHERE id = ?", id).Scan(&currentStatus); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المهمة غير موجودة"})
+		return
+	}
+	if currentStatus == input.Status || !transitionAllowed(allowedTaskFrom, input.Status, currentStatus) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "لا يمكن تنفيذ هذا الإجراء على المهمة في حالتها الحالية",
+		})
+		return
+	}
+
 	var userName string
 	logErr("UpdateResearchTaskStatus userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
 
 	txErr := withTx(func(tx *sql.Tx) error {
 		now := time.Now()
+		// الحارس داخل المعاملة أيضاً (AND status IN ...) لأمان التزامن:
+		// لو مرّ نداءان الفحص المسبق معاً، ينجح أوّلهما فقط.
+		sources := allowedTaskFrom[input.Status]
 		query := "UPDATE research_tasks SET status = ?, updated_at = ?"
 		args := []interface{}{input.Status, now}
 		if input.Status == "submitted" || input.Status == "completed" {
 			query += ", submitted_date = ?"
 			args = append(args, now)
 		}
-		query += " WHERE id = ?"
+		query += " WHERE id = ? AND status IN (" + placeholders(len(sources)) + ")"
 		args = append(args, id)
+		for _, src := range sources {
+			args = append(args, src)
+		}
 
-		if _, err := tx.Exec(query, args...); err != nil {
+		res, err := tx.Exec(query, args...)
+		if err != nil {
 			return fmt.Errorf("UPDATE research_task: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errStateConflict // خسر سباق التزامن
 		}
 
 		// Workflow الجديد (req.md - بوابة الباحث):
@@ -271,6 +304,12 @@ func UpdateResearchTaskStatus(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("تحديث حالة المهمة إلى %s", input.Status))
 	})
 
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "تغيّرت حالة المهمة، يرجى تحديث الصفحة",
+		})
+		return
+	}
 	if txErr != nil {
 		log.Printf("UpdateResearchTaskStatus tx failed: %v", txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تحديث الحالة"})
@@ -657,12 +696,18 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 				nextStatus = "pending_manager_send"
 			}
 
-			if _, err := tx.Exec(`
+			// AND status='pending_assistant' لأمان التزامن: نقرتان متزامنتان
+			// على «اعتماد» لا تعتمدان الطلب مرّتين وتُكرّران الإشعارات
+			res, err := tx.Exec(`
 				UPDATE requests SET status = ?, confidentiality = ?,
 				       assistant_review_by = ?, assistant_review_date = ?, updated_at = ?
-				WHERE id = ?
-			`, nextStatus, confidentiality, userID, now, now, id); err != nil {
+				WHERE id = ? AND status = 'pending_assistant'
+			`, nextStatus, confidentiality, userID, now, now, id)
+			if err != nil {
 				return fmt.Errorf("UPDATE requests: %w", err)
+			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				return errStateConflict
 			}
 
 			// جمع المستلمين حسب المسار
@@ -719,9 +764,13 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 			return logActivityTx(tx, r, userID, userName, "assistant_approve", strPtr("request"), &id, details)
 		}
 
-		// رفض: يرجع للباحث
-		if _, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ?", now, id); err != nil {
+		// رفض: يرجع للباحث — بحارس الحالة لأمان التزامن
+		res, err := tx.Exec("UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ? AND status = 'pending_assistant'", now, id)
+		if err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errStateConflict
 		}
 
 		note := cleanNotes
@@ -757,6 +806,12 @@ func AssistantFinalReview(w http.ResponseWriter, r *http.Request) {
 		return logActivityTx(tx, r, userID, userName, "assistant_reject", strPtr("request"), &id, "رفض المعاون - إرجاع للباحث")
 	})
 
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "تغيّرت حالة الطلب، يرجى تحديث الصفحة",
+		})
+		return
+	}
 	if txErr != nil {
 		log.Printf("AssistantFinalReview tx failed: %v", txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تسجيل القرار"})
@@ -820,12 +875,20 @@ func deliverToDeputy(w http.ResponseWriter, r *http.Request, id string, userID i
 
 	txErr := withTx(func(tx *sql.Tx) error {
 		now := time.Now()
-		if _, err := tx.Exec(`
+		// AND status IN(...) داخل المعاملة: المستدعي يفحص الحالة خارجها، لكن
+		// نقرتين متزامنتين (double-click/إعادة محاولة) تمرّان الفحص معاً فيُرسَل
+		// SMS التسليم لرقم النائب مرّتين وتتكرّر الإشعارات. الحارس هنا يضمن
+		// تنفيذ التسليم مرّة واحدة فقط.
+		res, err := tx.Exec(`
 			UPDATE requests SET status = 'delivered', completed_date = ?,
 			       delivered_to_deputy_date = ?, final_review_by = ?, final_review_date = ?, updated_at = ?
-			WHERE id = ?
-		`, now, now, userID, now, now, id); err != nil {
+			WHERE id = ? AND status IN ('pending_dept_send', 'pending_manager_send')
+		`, now, now, userID, now, now, id)
+		if err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errStateConflict
 		}
 
 		// إشعار النائب — بريد إلكتروني/SMS placeholder
@@ -890,6 +953,12 @@ func deliverToDeputy(w http.ResponseWriter, r *http.Request, id string, userID i
 		return logActivityTx(tx, r, userID, userName, action, strPtr("request"), &id, details)
 	})
 
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "تم إرسال هذا البحث للنائب مسبقاً",
+		})
+		return
+	}
 	if txErr != nil {
 		log.Printf("deliverToDeputy (%s) tx failed: %v", action, txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل الإرسال للنائب"})
@@ -946,13 +1015,24 @@ func UpdateArchiveConsent(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("UPDATE research_task: %w", err)
 		}
 
-		if input.Consent == "approved" {
+		// تجميع قرار الأرشفة على مستوى الطلب من كل مهامه.
+		// بدونه كان قرار كل باحث يدهس قرار الطلب: في طلب بباحثَين، موافقةُ
+		// الأول تضبط archived=1 ثم رفضُ الثاني يمحوها بلا مصالحة.
+		// القاعدة: يُؤرشَف الطلب فقط إذا وافق كل الباحثين المعيَّنين له.
+		var totalTasks, approvedTasks int
+		if err := tx.QueryRow(`
+			SELECT COUNT(*), COALESCE(SUM(CASE WHEN archive_consent = 'approved' THEN 1 ELSE 0 END), 0)
+			FROM research_tasks WHERE request_id = ?
+		`, requestID).Scan(&totalTasks, &approvedTasks); err != nil {
+			return fmt.Errorf("تجميع موافقات الأرشفة: %w", err)
+		}
+		if totalTasks > 0 && approvedTasks == totalTasks {
 			if _, err := tx.Exec(`UPDATE requests SET archived = 1, archived_date = ?, status = 'completed', updated_at = ? WHERE id = ?`, now, now, requestID); err != nil {
-				return fmt.Errorf("UPDATE requests (approved): %w", err)
+				return fmt.Errorf("UPDATE requests (archived): %w", err)
 			}
 		} else {
 			if _, err := tx.Exec(`UPDATE requests SET archived = 0, status = 'completed', updated_at = ? WHERE id = ?`, now, requestID); err != nil {
-				return fmt.Errorf("UPDATE requests (rejected): %w", err)
+				return fmt.Errorf("UPDATE requests (not archived): %w", err)
 			}
 		}
 

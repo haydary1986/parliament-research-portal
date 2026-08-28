@@ -172,7 +172,13 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
     setLoading(true)
     setShowInfo(false); setTarget(''); setSubject(''); setConsentNotes('')
     setLetterNumber(''); setLetterDate('')
-    api.getResearchTask(task.id).then((r) => { if (r.success) setDetail(r.data) }).catch(() => {}).finally(() => setLoading(false))
+    // علم cancelled: يمنع ردّ مهمةٍ سابقة من دهس تفاصيل مهمةٍ فُتحت بعدها
+    let cancelled = false
+    api.getResearchTask(task.id)
+      .then((r) => { if (!cancelled && r.success) setDetail(r.data) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [task])
 
   if (!task) return null

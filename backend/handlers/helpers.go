@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"log"
@@ -19,12 +20,20 @@ import (
 	"github.com/microcosm-cc/bluemonday"
 )
 
-// تنظيف HTML من المدخلات - StrictPolicy تحذف كل العلامات
-// ثم نفك ترميز HTML entities (مثل &amp;) لتفادي الترميز المزدوج عند العرض
+// تنظيف HTML من المدخلات — StrictPolicy تحذف كل العلامات.
+//
+// الترتيب حاسم: نفكّ الترميز أولاً ثم نُنقّي، فتكون التنقية آخر خطوة دائماً
+// ولا يمكن أن يُخزَّن وسمٌ حيّ. الترتيب المعكوس (تنقية ثم فكّ) كان يعكس
+// التنقية: مدخل مُرمَّز كـ &lt;script&gt; يمرّ عبر bluemonday كنصّ ثم يفكّه
+// html.UnescapeString إلى وسم <script> خام — ثغرة XSS مخزَّنة كامنة لأي
+// مستهلك لا يُهرّب (PDF/بريد/WebView).
 var sanitizer = bluemonday.StrictPolicy()
 
 func sanitize(s string) string {
-	return html.UnescapeString(sanitizer.Sanitize(s))
+	stripped := sanitizer.Sanitize(html.UnescapeString(s))
+	// إعادة العطف وحده (& آمن ولا يشكّل وسماً، بعكس < >) لتفادي الترميز
+	// المزدوج عند العرض في نصوص مثل «النفط & الغاز»
+	return strings.ReplaceAll(stripped, "&amp;", "&")
 }
 
 func sanitizePtr(s *string) *string {
@@ -123,23 +132,8 @@ func getQueryInt(r *http.Request, key string, defaultVal int) int {
 // currentIP يستخرج عنوان العميل من سياق الطلب.
 // خلف Cloudflare/Traefik يكون RemoteAddr هو الوسيط، فنقدّم الترويسات الموثوقة.
 func currentIP(r *http.Request) string {
-	if r == nil {
-		return ""
-	}
-	if v := r.Header.Get("CF-Connecting-IP"); v != "" {
-		return v
-	}
-	if v := r.Header.Get("X-Real-IP"); v != "" {
-		return v
-	}
-	if v := r.Header.Get("X-Forwarded-For"); v != "" {
-		// أول عنوان في السلسلة هو العميل الأصلي
-		if i := strings.Index(v, ","); i > 0 {
-			return strings.TrimSpace(v[:i])
-		}
-		return strings.TrimSpace(v)
-	}
-	return middleware.ExtractIP(r.RemoteAddr)
+	// موحَّد مع حظر المعدّل: نفس ترتيب ترويسات العميل الحقيقي
+	return middleware.ClientIP(r)
 }
 
 func logActivity(userID int, userName, action string, entityType, entityID *string, details string) {
@@ -341,6 +335,22 @@ const (
 	ConfidentialityPublic       = "public"
 	ConfidentialityConfidential = "confidential"
 )
+
+// errStateConflict إشارة إلى أن كائناً ليس في الحالة المتوقَّعة للانتقال.
+// تُترجَم إلى 409 بدل 500، وتحرس آلة الحالات من التلف بإعادة إرسال إجراء
+// (نقرة مزدوجة، رجوع المتصفح، إعادة محاولة) على طلب تجاوز مرحلته.
+var errStateConflict = errors.New("state conflict")
+
+// guardTransition يمنع نقل قيمة الحالة إلا من مصدر مسموح.
+// يرجع true إن كان الانتقال مسموحاً من الحالة الحالية.
+func transitionAllowed(allowed map[string][]string, target, current string) bool {
+	for _, src := range allowed[target] {
+		if src == current {
+			return true
+		}
+	}
+	return false
+}
 
 // isUniqueViolation يميّز خطأ تكرار مفتاح فريد عن أي فشل آخر في القاعدة.
 // بدونه يعود 500 لما هو في حقيقته خطأ عميل (بريد أو معرّف مستخدَم سلفاً).
