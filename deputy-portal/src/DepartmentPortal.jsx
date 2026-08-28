@@ -337,7 +337,14 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
     // علم cancelled: يمنع ردّ طلبٍ سابق من دهس تفاصيل طلبٍ فُتح بعده
     let cancelled = false
     api.getRequest(request.id)
-      .then((r) => { if (!cancelled && r.success) setDetail(r.data) })
+      .then((r) => {
+        if (cancelled || !r.success) return
+        setDetail(r.data)
+        // تهيئة اختيار الباحثين باقتراح مدير الدائرة إن وُجد (غير مُلزِم — يمكن تغييره)
+        if (Array.isArray(r.data?.suggested_researchers) && r.data.suggested_researchers.length > 0) {
+          setSelectedResearchers(r.data.suggested_researchers)
+        }
+      })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
@@ -443,16 +450,25 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
                 </div>
               </div>
               <label className="label label-required">الباحث/الباحثون</label>
+              {Array.isArray(d?.suggested_researchers) && d.suggested_researchers.length > 0 && (
+                <p className="text-[11px] text-[var(--color-gold-700)] bg-[var(--color-gold-50)] border border-[var(--color-gold-200)] rounded-lg p-2 mb-2">
+                  اقترح مدير الدائرة باحثاً — مُهيَّأ أدناه، ويمكنك تغييره.
+                </p>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3 max-h-56 overflow-y-auto">
                 {researchers.map((r) => {
                   const checked = selectedResearchers.includes(r.id)
+                  const suggested = Array.isArray(d?.suggested_researchers) && d.suggested_researchers.includes(r.id)
                   return (
                     <label key={r.id} className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition ${
                       checked ? 'border-[var(--color-gold-500)] bg-white' : 'border-[var(--color-border)] bg-white/50 hover:bg-white'
                     }`}>
                       <input type="checkbox" checked={checked} onChange={() => toggleResearcher(r.id)} className="w-4 h-4" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate">{r.name}</p>
+                        <p className="text-sm font-semibold truncate">
+                          {r.name}
+                          {suggested && <span className="mr-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-[var(--color-gold-100)] text-[var(--color-gold-800)]">مُقترَح</span>}
+                        </p>
                         <p className="text-[10px] text-[var(--color-navy-500)]">{r.specialization || 'باحث'}</p>
                       </div>
                     </label>

@@ -28,6 +28,13 @@ func Migrate() error {
 		return fmt.Errorf("ترحيل جدول requests: %w", err)
 	}
 
+	// اقتراح مدير الدائرة للباحث (اختياري، غير مُلزِم) — قائمة معرّفات مفصولة
+	// بفاصلة. الطلب لا يذهب للباحث مباشرةً؛ رئيس القسم يوافق ويعيّن مستعيناً
+	// بالاقتراح إن وُجد.
+	if err := addColumnIfMissing("requests", "suggested_researchers", "TEXT"); err != nil {
+		return fmt.Errorf("ترحيل requests.suggested_researchers: %w", err)
+	}
+
 	// جداول حالة الأمان الدائمة — CREATE TABLE IF NOT EXISTS في schema.sql
 	// ينشئها تلقائياً على القواعد الجديدة والقائمة معاً، فلا ترحيل إضافياً لها.
 

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"noab-backend/db"
@@ -185,6 +187,18 @@ func GetRequest(w http.ResponseWriter, r *http.Request) {
 		&conf.CompletionDays, &conf.ConfirmedBy, &conf.ConfirmedAt)
 	if err == nil {
 		req.Confirmation = &conf
+	}
+
+	// اقتراح مدير الدائرة للباحث (اختياري) — لتهيئة نموذج تأكيد رئيس القسم
+	var suggested sql.NullString
+	logErr("GetRequest suggested_researchers",
+		db.DB.QueryRow("SELECT suggested_researchers FROM requests WHERE id = ?", id).Scan(&suggested))
+	if suggested.Valid && suggested.String != "" {
+		for _, part := range strings.Split(suggested.String, ",") {
+			if n, err := strconv.Atoi(strings.TrimSpace(part)); err == nil && n > 0 {
+				req.SuggestedResearchers = append(req.SuggestedResearchers, n)
+			}
+		}
 	}
 
 	// عدد كتب المخاطبات الرسمية لكل مهام هذا الطلب
@@ -746,40 +760,13 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// توحيد قائمة الباحثين (اختيارية)
+	// قائمة الباحثين المقترَحين من مدير الدائرة (اختيارية وغير مُلزِمة).
+	// لا تُنشئ مهمة بحث ولا تُرسل الطلب للباحث — رئيس القسم يوافق ويعيّن
+	// مستعيناً بها. إن قُدِّمت، نتحقّق أن الباحثين ضمن الأقسام المُحالة فقط.
 	researchers := dedupeInts(input.ResearcherIDs)
-
-	// عند التعيين المباشر: تفاصيل الإعداد مطلوبة والباحثون يجب أن يكونوا ضمن الأقسام المُحالة
 	if len(researchers) > 0 {
-		if input.ServiceType == "" || input.Classification == "" {
-			writeJSON(w, http.StatusBadRequest, models.APIResponse{
-				Success: false, Message: "عند تعيين باحث يجب تحديد نوع الخدمة والتصنيف",
-			})
-			return
-		}
-		// القيمتان مقيَّدتان بـ CHECK في المخطط — نتحقّق هنا لنعيد 400 مفهومة
-		if msg := validateConfirmation(input.ServiceType, input.Classification, input.CompletionDays); msg != "" {
-			writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
-			return
-		}
-		if input.CompletionDays < 1 || input.CompletionDays > 365 {
-			writeJSON(w, http.StatusBadRequest, models.APIResponse{
-				Success: false, Message: "مدة الإنجاز يجب أن تكون بين 1 و 365 يوماً",
-			})
-			return
-		}
 		if msg := validateResearchersInDepartments(researchers, deptIDs); msg != "" {
 			writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: msg})
-			return
-		}
-		// لا نسمح بالتعيين المباشر إن كانت هناك مهام بحث قائمة (تفادياً لازدواج العمل)
-		var existingTasks int
-		logErr("AssignRequest task count",
-			db.DB.QueryRow("SELECT COUNT(*) FROM research_tasks WHERE request_id = ?", id).Scan(&existingTasks))
-		if existingTasks > 0 {
-			writeJSON(w, http.StatusBadRequest, models.APIResponse{
-				Success: false, Message: "الطلب له مهام بحث قائمة — استخدم إعادة إسناد المهمة بدل التعيين المباشر",
-			})
 			return
 		}
 	}
@@ -792,32 +779,27 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 
 	primaryDept := deptIDs[0]
 
-	// الحالة الجديدة: in_progress عند التعيين المباشر، وإلا assigned
+	// الطلب دائماً إلى «قيد الإحالة» بانتظار موافقة رئيس القسم — لا يذهب
+	// للباحث مباشرةً حتى لو اقترح المدير باحثاً.
 	newStatus := "assigned"
-	if len(researchers) > 0 {
-		newStatus = "in_progress"
-	}
 
-	var deadline *time.Time
-	if input.CompletionDays > 0 {
-		d := time.Now().AddDate(0, 0, input.CompletionDays)
-		deadline = &d
+	// نص الاقتراح المخزَّن على الطلب (معرّفات مفصولة بفاصلة)
+	suggested := ""
+	for i, rid := range researchers {
+		if i > 0 {
+			suggested += ","
+		}
+		suggested += strconv.Itoa(rid)
 	}
-
-	type assignedTask struct {
-		taskID       string
-		researcherID int
-	}
-	var createdTasks []assignedTask
 
 	txErr := withTx(func(tx *sql.Tx) error {
 		now := time.Now()
 		// التحديث الرئيسي للطلب: نخزن أول قسم كـ "primary" + الحالة
 		result, err := tx.Exec(`
 			UPDATE requests SET assigned_department = ?, status = ?,
-			       referral_date = ?, updated_at = ?
+			       suggested_researchers = ?, referral_date = ?, updated_at = ?
 			WHERE id = ? AND status IN ('pending', 'assigned')
-		`, primaryDept, newStatus, now, now, id)
+		`, primaryDept, newStatus, nullIfEmpty(suggested), now, now, id)
 		if err != nil {
 			return fmt.Errorf("UPDATE requests: %w", err)
 		}
@@ -840,32 +822,12 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// التعيين المباشر: تأكيد الطلب + مهمة بحث لكل باحث
-		if len(researchers) > 0 {
-			if _, err := tx.Exec(`
-				INSERT OR REPLACE INTO request_confirmations (request_id, service_type, classification, completion_days, confirmed_by)
-				VALUES (?, ?, ?, ?, ?)
-			`, id, input.ServiceType, input.Classification, input.CompletionDays, userID); err != nil {
-				return fmt.Errorf("INSERT confirmation: %w", err)
-			}
-			for _, rid := range researchers {
-				taskID := generateID("RT")
-				if _, err := tx.Exec(`
-					INSERT INTO research_tasks (id, request_id, researcher_id, status, deadline, completion_days)
-					VALUES (?, ?, ?, 'assigned', ?, ?)
-				`, taskID, id, rid, deadline, input.CompletionDays); err != nil {
-					return fmt.Errorf("INSERT research_task: %w", err)
-				}
-				createdTasks = append(createdTasks, assignedTask{taskID, rid})
-			}
-		}
-
 		details := fmt.Sprintf("إحالة الطلب إلى قسم %s", primaryDept)
 		if len(deptIDs) > 1 {
 			details = fmt.Sprintf("إحالة الطلب إلى %d أقسام", len(deptIDs))
 		}
 		if len(researchers) > 0 {
-			details += fmt.Sprintf(" وتعيين %d باحث مباشرةً من مدير الدائرة", len(researchers))
+			details += fmt.Sprintf(" مع اقتراح %d باحث لرئيس القسم", len(researchers))
 		}
 		if err := logActivityTx(tx, r, userID, userName, "assign_request", strPtr("request"), &id, details); err != nil {
 			return err
@@ -889,23 +851,13 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		rows.Close()
 
-		headMsg := fmt.Sprintf("تمت إحالة الطلب %s إلى قسمكم", id)
+		headMsg := fmt.Sprintf("تمت إحالة الطلب %s إلى قسمكم — بانتظار تأكيدكم وتعيين الباحث", id)
 		if len(researchers) > 0 {
-			headMsg = fmt.Sprintf("تمت إحالة الطلب %s إلى قسمكم مع تعيين الباحث/الباحثين من مدير الدائرة", id)
+			headMsg = fmt.Sprintf("تمت إحالة الطلب %s إلى قسمكم مع اقتراح باحث من مدير الدائرة — بانتظار تأكيدكم", id)
 		}
 		for _, h := range notifyHeads {
 			if err := createNotificationTx(tx, h, "طلب بحثي جديد",
 				headMsg, "info", strPtr("request"), &id); err != nil {
-				return err
-			}
-		}
-
-		// إشعار الباحثين المعينين مباشرةً
-		for _, t := range createdTasks {
-			tID := t.taskID
-			if err := createNotificationTx(tx, t.researcherID, "مهمة بحثية جديدة",
-				fmt.Sprintf("تم تعيينك للعمل على الطلب %s", id),
-				"info", strPtr("research_task"), &tID); err != nil {
 				return err
 			}
 		}
@@ -926,9 +878,9 @@ func AssignRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg := "تمت إحالة الطلب بنجاح"
+	msg := "تمت إحالة الطلب إلى القسم — بانتظار تأكيد رئيس القسم وتعيين الباحث"
 	if len(researchers) > 0 {
-		msg = fmt.Sprintf("تمت الإحالة وتعيين %d باحث", len(researchers))
+		msg = fmt.Sprintf("تمت الإحالة مع اقتراح %d باحث — يعتمده رئيس القسم", len(researchers))
 	}
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: msg})
 }

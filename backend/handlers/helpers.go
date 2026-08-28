@@ -189,6 +189,14 @@ func createNotificationTx(tx *sql.Tx, userID int, title, message, notifType stri
 	return nil
 }
 
+// nullIfEmpty يعيد nil لنصّ فارغ ليُخزَّن NULL بدل سلسلة فارغة
+func nullIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func strPtr(s string) *string {
 	return &s
 }

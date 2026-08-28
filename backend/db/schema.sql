@@ -107,6 +107,9 @@ CREATE TABLE IF NOT EXISTS requests (
     referral_date DATETIME,
     completed_date DATETIME,
     existing_research_id TEXT,
+    -- اقتراح مدير الدائرة للباحث (اختياري) — معرّفات مفصولة بفاصلة.
+    -- غير مُلزِم: رئيس القسم يوافق ويعيّن. الطلب لا يذهب للباحث مباشرةً.
+    suggested_researchers TEXT,
     delivered_to_deputy_date DATETIME,
     archived INTEGER DEFAULT 0,
     archived_date DATETIME,

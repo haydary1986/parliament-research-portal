@@ -101,6 +101,9 @@ type Request struct {
 	// ملفات البحث المرفوعة — تُتاح لكل من يحق له قراءة الطلب
 	// (الجهة الطالبة، فريق القسم، المدقق، المعاون، الإدارة)
 	Files []RequestFile `json:"files,omitempty"`
+
+	// اقتراح مدير الدائرة للباحث (اختياري) — يُهيَّأ في نموذج تأكيد رئيس القسم
+	SuggestedResearchers []int `json:"suggested_researchers,omitempty"`
 }
 
 // RequestFile ملف بحث مرفوع مرتبط بمهمة

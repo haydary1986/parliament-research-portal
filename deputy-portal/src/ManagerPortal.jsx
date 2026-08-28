@@ -15,7 +15,7 @@ import {
 } from './components/icons/Icons'
 import {
   formatDate, PURPOSE_LABELS, MANAGER_DASHBOARD_LABELS,
-  CONFIDENTIALITY_LABELS, REQUESTER_TYPES, SERVICE_TYPES, CLASSIFICATIONS,
+  CONFIDENTIALITY_LABELS, REQUESTER_TYPES,
 } from './lib/format'
 import { COMMITTEES } from './lib/committees'
 import * as api from './api'
@@ -78,7 +78,7 @@ export default function ManagerPortal({ user, onLogout }) {
 
   const meta = {
     dashboard: { title: 'لوحة المعلومات', subtitle: 'نظرة عامة على عمل دائرة البحوث' },
-    pending: { title: 'الطلبات قيد الإحالة', subtitle: 'طلبات بحاجة إلى إحالة لقسم أو إرجاع — يمكنك تعيين الباحث مباشرةً' },
+    pending: { title: 'الطلبات قيد الإحالة', subtitle: 'طلبات بحاجة إلى إحالة لقسم أو إرجاع — يمكنك اقتراح باحث لرئيس القسم' },
     to_send: { title: 'بحوث بانتظار إرسالك للنائب', subtitle: 'بحوث ذات خصوصية وحساسية اعتمدها المعاون' },
     reviews: { title: 'المراجعات النهائية', subtitle: 'بحوث بانتظار الاعتماد النهائي قبل التسليم' },
     all: { title: 'جميع الطلبات', subtitle: 'سجل كامل لكل الطلبات في الدائرة' },
@@ -379,11 +379,8 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
   const [busy, setBusy] = useState(false)
   const [reviewDecision, setReviewDecision] = useState('approve')
   const [reviewNotes, setReviewNotes] = useState('')
-  // تعيين الباحث مباشرةً من مدير الدائرة (اختياري)
+  // اقتراح مدير الدائرة للباحث (اختياري وغير مُلزِم)
   const [assignResearchers, setAssignResearchers] = useState([])
-  const [serviceType, setServiceType] = useState(SERVICE_TYPES[0])
-  const [classification, setClassification] = useState(CLASSIFICATIONS[0])
-  const [days, setDays] = useState(30)
   const [editOpen, setEditOpen] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
   const [showReject, setShowReject] = useState(false)
@@ -443,14 +440,8 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
     if (selectedDepts.length === 0) return toast.error('اختر قسماً واحداً على الأقل')
     setBusy(true)
     try {
-      const extra = assignResearchers.length > 0
-        ? {
-            researcher_ids: assignResearchers,
-            service_type: serviceType,
-            classification,
-            completion_days: parseInt(days, 10),
-          }
-        : {}
+      // الباحثون اقتراح غير مُلزِم فقط — رئيس القسم يعتمد ويحدّد تفاصيل الإعداد
+      const extra = assignResearchers.length > 0 ? { researcher_ids: assignResearchers } : {}
       const res = await api.assignRequest(d.id, selectedDepts, extra)
       toast.success(res.message || 'تمت الإحالة')
       onChanged()
@@ -617,14 +608,14 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
                   )
                 })}
               </div>
-              {/* تعيين الباحث مباشرةً (اختياري) */}
+              {/* اقتراح باحث لرئيس القسم (اختياري، غير مُلزِم) */}
               <div className="pt-3 mt-1 border-t border-[var(--color-navy-200)]">
                 <div className="flex items-center gap-2 mb-1">
                   <IconUsers className="w-4 h-4 text-[var(--color-gold-700)]" />
-                  <h5 className="font-bold text-sm text-[var(--color-navy-900)]">تعيين الباحث/الباحثين (اختياري)</h5>
+                  <h5 className="font-bold text-sm text-[var(--color-navy-900)]">اقتراح باحث لرئيس القسم (اختياري)</h5>
                 </div>
                 <p className="text-xs text-[var(--color-navy-600)] mb-3">
-                  اتركه فارغاً ليتولى رئيس القسم التعيين، أو عيّن الباحثين الآن ليبدأ العمل مباشرةً
+                  اقتراح غير مُلزِم — الطلب يذهب لرئيس القسم الذي يعتمد ويعيّن الباحث. اتركه فارغاً ليختار رئيس القسم بنفسه.
                 </p>
 
                 {selectedDepts.length === 0 ? (
@@ -652,24 +643,9 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
                     </div>
 
                     {assignResearchers.length > 0 && (
-                      <div className="grid grid-cols-2 gap-3 mb-1">
-                        <div>
-                          <label className="label label-required">نوع الخدمة</label>
-                          <select className="select" value={serviceType} onChange={(e) => setServiceType(e.target.value)}>
-                            {SERVICE_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="label label-required">التصنيف</label>
-                          <select className="select" value={classification} onChange={(e) => setClassification(e.target.value)}>
-                            {CLASSIFICATIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        </div>
-                        <div className="col-span-2">
-                          <label className="label label-required">مدة الإنجاز (أيام)</label>
-                          <input type="number" min={1} max={365} value={days} onChange={(e) => setDays(e.target.value)} className="input" />
-                        </div>
-                      </div>
+                      <p className="text-[11px] text-[var(--color-navy-500)] bg-[var(--color-surface-soft)] rounded-lg p-2">
+                        نوع الخدمة والتصنيف ومدة الإنجاز يحدّدها رئيس القسم عند اعتماد الطلب وتعيين الباحث.
+                      </p>
                     )}
                   </>
                 )}
@@ -678,7 +654,7 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
               <div className="flex gap-2 mt-3">
                 <button onClick={assign} disabled={busy || selectedDepts.length === 0} className="btn-primary flex-1">
                   {d.status === 'pending' ? 'إحالة' : 'حفظ التغييرات'} {selectedDepts.length > 0 && `(${selectedDepts.length})`}
-                  {assignResearchers.length > 0 && ` + ${assignResearchers.length} باحث`}
+                  {assignResearchers.length > 0 && ` + اقتراح ${assignResearchers.length} باحث`}
                 </button>
                 {d.status === 'pending' && (
                   <button onClick={returnReq} disabled={busy} className="btn-outline flex-1">لا يمكن التنفيذ</button>
