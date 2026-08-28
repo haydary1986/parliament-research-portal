@@ -5,10 +5,16 @@
 const RAW_BASE = import.meta.env.VITE_API_BASE;
 const API_BASE = (RAW_BASE !== undefined ? RAW_BASE : 'http://localhost:8080') + '/api';
 
+// في الإنتاج الواجهة والـAPI على نفس الأصل، فكوكي الجلسة httpOnly (SameSite=Lax)
+// يُرسَل تلقائياً ولا نحتاج حفظ الرمز في JS إطلاقاً — أقوى ضد سرقة XSS.
+// في التطوير المنفذان مختلفان (5173 ≠ 8080) فلا يُرسَل كوكي Lax عبر الأصول،
+// لذا نحتفظ بالرمز في الذاكرة ونرسله ترويسةً — مسار التطوير والاختبار فقط.
+const USE_HEADER_TOKEN = /^https?:\/\//.test(RAW_BASE ?? 'http://localhost:8080');
+
 let authToken = null;
 
 export function setToken(token) {
-  authToken = token;
+  if (USE_HEADER_TOKEN) authToken = token;
 }
 
 export function getToken() {
@@ -21,7 +27,8 @@ async function request(method, path, body = null) {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
 
-  const opts = { method, headers };
+  // credentials: 'include' يُرسِل كوكي الجلسة (وضروري للطلبات المعتمَدة عبر CORS)
+  const opts = { method, headers, credentials: 'include' };
   if (body) {
     opts.body = JSON.stringify(body);
   }
@@ -39,10 +46,16 @@ async function request(method, path, body = null) {
 // ========== Auth ==========
 export async function login(email, password) {
   const data = await request('POST', '/auth/login', { email, password });
-  if (data.success && data.data?.token) {
+  // في الإنتاج نعتمد على كوكي httpOnly ولا نلمس الرمز؛ في التطوير فقط نحفظه
+  if (data.success && data.data?.token && USE_HEADER_TOKEN) {
     authToken = data.data.token;
   }
   return data;
+}
+
+// جلب المستخدم الحالي من الجلسة (كوكي httpOnly) — لاستعادة الجلسة بعد F5
+export function getMe() {
+  return request('GET', '/auth/me');
 }
 
 // ========== Dashboard ==========

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"noab-backend/db"
@@ -12,6 +13,41 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+// اسم كوكي الجلسة. الرمز يُحفظ httpOnly فلا يصله JavaScript — حتى لو ظهرت
+// ثغرة XSS مستقبلاً لا يمكن سرقة الجلسة، والجلسة تبقى عبر تحديث الصفحة.
+const authCookieName = "auth_token"
+
+// setAuthCookie يضبط كوكي الجلسة الآمن.
+//
+//	HttpOnly → خارج متناول JS
+//	SameSite=Lax → يمنع CSRF في طلبات التغيير عبر المواقع، ويسمح بالوصول
+//	  من رابط خارجي (بريد) دون إظهار المستخدم «خارجاً» في أول تحميل
+//	Secure → في الإنتاج فقط (HTTPS)؛ يُترك false محلياً ليعمل عبر http
+func setAuthCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   os.Getenv("GO_ENV") == "production",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   8 * 60 * 60, // مطابق لصلاحية الرمز (8 ساعات)
+	})
+}
+
+// clearAuthCookie يمحو كوكي الجلسة عند الخروج
+func clearAuthCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   os.Getenv("GO_ENV") == "production",
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
 
 func Login(w http.ResponseWriter, r *http.Request) {
 	var input models.LoginRequest
@@ -117,6 +153,11 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// كوكي httpOnly للمتصفح. نُبقي الرمز في الجسم أيضاً لعملاء الترويسة
+	// (سكربتات/اختبارات API)، لكن واجهة المتصفح تعتمد على الكوكي ولا تلمس
+	// الرمز في JS.
+	setAuthCookie(w, token)
+
 	writeJSON(w, http.StatusOK, models.APIResponse{
 		Success: true,
 		Message: "تم تسجيل الدخول بنجاح",
@@ -127,8 +168,36 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// تسجيل الخروج - إضافة Token للقائمة السوداء
+// GET /api/auth/me - المستخدم الحالي من الجلسة.
+// تستدعيها الواجهة عند الإقلاع لاستعادة الجلسة بعد تحديث الصفحة (F5)،
+// إذ لم يعد الرمز محفوظاً في ذاكرة JS بل في كوكي httpOnly.
+func GetMe(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	var user models.User
+	var deptID *string
+	err := db.DB.QueryRow(`
+		SELECT id, name, email, role, department_id, deputy_id,
+		       requester_type, committee, phone
+		FROM users WHERE id = ? AND status = 'active'
+	`, userID).Scan(
+		&user.ID, &user.Name, &user.Email, &user.Role,
+		&deptID, &user.DeputyID, &user.RequesterType, &user.Committee, &user.Phone,
+	)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, models.APIResponse{Success: false, Message: "الجلسة غير صالحة"})
+		return
+	}
+	if deptID != nil {
+		user.DepartmentID = deptID
+	}
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: user})
+}
+
+// تسجيل الخروج - إضافة Token للقائمة السوداء ومحو كوكي الجلسة
 func Logout(w http.ResponseWriter, r *http.Request) {
+	// نمحو الكوكي أولاً حتى لو لم يكن الرمز في السياق
+	clearAuthCookie(w)
+
 	tokenStr, ok := r.Context().Value(middleware.TokenKey).(string)
 	if !ok || tokenStr == "" {
 		writeJSON(w, http.StatusBadRequest, models.APIResponse{

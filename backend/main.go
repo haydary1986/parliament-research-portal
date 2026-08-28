@@ -190,6 +190,7 @@ func main() {
 
 	// تسجيل خروج + أمان
 	mux.Handle("POST /api/auth/logout", auth(http.HandlerFunc(handlers.Logout)))
+	mux.Handle("GET /api/auth/me", auth(http.HandlerFunc(handlers.GetMe)))
 	mux.Handle("GET /api/security/stats", role("admin")(http.HandlerFunc(handlers.GetSecurityStats)))
 
 	handler := middleware.Logger(middleware.CORS(middleware.BodyLimit(mux)))

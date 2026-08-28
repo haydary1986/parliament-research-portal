@@ -305,13 +305,20 @@ func GetSecurityStats() map[string]interface{} {
 // =============================================
 func Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
-			http.Error(w, `{"success":false,"message":"غير مصرح"}`, http.StatusUnauthorized)
-			return
+		// الكوكي httpOnly أولاً (مسار المتصفح)، ثم ترويسة Authorization
+		// (عملاء الـ API والاختبارات). بدون أيٍّ منهما: غير مصرح.
+		tokenStr := ""
+		if c, err := r.Cookie("auth_token"); err == nil && c.Value != "" {
+			tokenStr = c.Value
 		}
-
-		tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenStr == "" {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				http.Error(w, `{"success":false,"message":"غير مصرح"}`, http.StatusUnauthorized)
+				return
+			}
+			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+		}
 
 		// فحص القائمة السوداء: الذاكرة أولاً (سريع) ثم التخزين الدائم
 		if IsBlacklisted(tokenStr) || (RevokedChecker != nil && RevokedChecker(tokenStr)) {

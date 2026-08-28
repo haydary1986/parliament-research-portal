@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import DeputyPortal from './DeputyPortal'
 import ManagerPortal from './ManagerPortal'
 import DepartmentPortal from './DepartmentPortal'
@@ -6,7 +6,7 @@ import ResearcherPortal from './ResearcherPortal'
 import ProofreaderPortal from './ProofreaderPortal'
 import AssistantManagerPortal from './AssistantManagerPortal'
 import SuperAdminPortal from './SuperAdminPortal'
-import { login as apiLogin, logout as apiLogout, setToken } from './api'
+import { login as apiLogin, logout as apiLogout, setToken, getMe } from './api'
 import Spinner from './components/ui/Spinner'
 import { ToastProvider, useToast } from './components/ui/Toast'
 import { IconMail, IconLock, IconEye, IconEyeOff, IconUser } from './components/icons/Icons'
@@ -381,6 +381,23 @@ function LoginPage({ onSuccess }) {
 function AppInner() {
   const [view, setView] = useState('login')
   const [user, setUser] = useState(null)
+  // فحص الجلسة عند الإقلاع: كوكي httpOnly يبقي المستخدم مسجَّلاً بعد F5
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    getMe()
+      .then((res) => {
+        if (cancelled || !res.success || !res.data) return
+        const apiUser = res.data
+        const portalId = ROLE_TO_PORTAL[apiUser.role] || 'deputy'
+        setUser({ ...apiUser, email: apiUser.email, portal: portalId })
+        setView(portalId)
+      })
+      .catch(() => { /* لا جلسة — تبقى صفحة الدخول */ })
+      .finally(() => { if (!cancelled) setChecking(false) })
+    return () => { cancelled = true }
+  }, [])
 
   const handleSuccess = (apiUser, portalId) => {
     setUser(apiUser)
@@ -391,6 +408,20 @@ function AppInner() {
     try { await apiLogout() } catch { /* ignore */ }
     setUser(null)
     setView('login')
+  }
+
+  // شاشة انتظار قصيرة أثناء فحص الجلسة — تمنع وميض صفحة الدخول عند إعادة التحميل
+  if (checking) {
+    return (
+      <div className="min-h-dvh flex items-center justify-center bg-[var(--color-navy-950)]">
+        <div className="flex flex-col items-center gap-4">
+          <CouncilLogo size={72} glow />
+          <div className="h-1 w-32 overflow-hidden rounded-full bg-white/10">
+            <div className="h-full w-1/2 animate-pulse rounded-full bg-[var(--color-gold-500)]" />
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (view === 'login') return <LoginPage onSuccess={handleSuccess} />
