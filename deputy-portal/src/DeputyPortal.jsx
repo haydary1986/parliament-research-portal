@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PortalLayout from './components/layout/PortalLayout'
 import StatusBadge from './components/ui/StatusBadge'
 import StatCard from './components/ui/StatCard'
@@ -238,17 +238,25 @@ function CreateRequestModal({ open, onClose, onCreated, defaultCommittees }) {
   const [busy, setBusy] = useState(false)
   const toast = useToast()
 
+  // اللجان الافتراضية عبر ref لا كتبعية للـ effect: الأب يعيد الرندر كل 30 ثانية
+  // (استطلاع الطلبات) ويُنشئ مصفوفة defaultCommittees جديدة في كل مرة. لو كانت
+  // تبعيةً للـ effect لأعادت التهيئة ومسحت ما يكتبه المستخدم أثناء ملء النموذج،
+  // فيجد العنوان فارغاً عند الضغط ويُطلب منه ثانيةً.
+  const defaultCommitteesRef = useRef(defaultCommittees)
+  defaultCommitteesRef.current = defaultCommittees
+
+  // إعادة التهيئة عند فتح النافذة فقط — لا عند كل إعادة رندر للأب
   useEffect(() => {
     if (open) {
       setTitle('')
       setDescription('')
       setPurpose('oversight')
-      // افتراضياً نختار كل لجان النائب
-      setCommittees(Array.isArray(defaultCommittees) ? defaultCommittees.filter((c) => COMMITTEES.includes(c)) : [])
+      const dc = defaultCommitteesRef.current
+      setCommittees(Array.isArray(dc) ? dc.filter((c) => COMMITTEES.includes(c)) : [])
       setCanShare(false)
       setConfidentiality('public')
     }
-  }, [open, defaultCommittees])
+  }, [open])
 
   const toggleCommittee = (c) => {
     setCommittees((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])
