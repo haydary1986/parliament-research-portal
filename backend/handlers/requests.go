@@ -640,6 +640,68 @@ func WithdrawRequest(w http.ResponseWriter, r *http.Request) {
 // under_manager_review المحذوفة من المخطط، فلم يكن أي دور يستطيع رفض طلب
 // غير مختص؛ الحالة 'rejected' لم تكن تُكتب إلا من سحب النائب لطلبه.
 // الرفض متاح قبل الإحالة فقط (pending)، ويشترط سبباً مسجَّلاً.
+// PUT /api/requests/{id}/cancel-referral - مدير الدائرة يلغي الإحالة ويعيد
+// الطلب إلى «انتظار التوجيه» ليعيد توجيهه. تراجُع آمن: يُسمح به فقط قبل أن
+// يؤكّد رئيس القسم (لا مهام بحث قائمة)، فلا يُفسد عملاً بدأ.
+func CancelReferral(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	var status string
+	if err := db.DB.QueryRow("SELECT status FROM requests WHERE id = ?", id).Scan(&status); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
+		return
+	}
+	if status != "assigned" {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "لا يمكن إلغاء الإحالة إلا قبل أن يؤكّد رئيس القسم",
+		})
+		return
+	}
+	var tasks int
+	logErr("CancelReferral task count",
+		db.DB.QueryRow("SELECT COUNT(*) FROM research_tasks WHERE request_id = ?", id).Scan(&tasks))
+	if tasks > 0 {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "بدأ العمل على الطلب — لا يمكن إلغاء الإحالة",
+		})
+		return
+	}
+
+	var userName string
+	logErr("CancelReferral userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+
+	txErr := withTx(func(tx *sql.Tx) error {
+		now := time.Now()
+		res, err := tx.Exec(`
+			UPDATE requests SET status = 'pending', assigned_department = NULL,
+			       suggested_researchers = NULL, referral_date = NULL, updated_at = ?
+			WHERE id = ? AND status = 'assigned'
+		`, now, id)
+		if err != nil {
+			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errStateConflict
+		}
+		if _, err := tx.Exec("DELETE FROM request_departments WHERE request_id = ?", id); err != nil {
+			return fmt.Errorf("clear request_departments: %w", err)
+		}
+		return logActivityTx(tx, r, userID, userName, "cancel_referral", strPtr("request"), &id, "إلغاء الإحالة وإعادة الطلب لانتظار التوجيه")
+	})
+
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{Success: false, Message: "تغيّرت حالة الطلب، يرجى تحديث الصفحة"})
+		return
+	}
+	if txErr != nil {
+		log.Printf("CancelReferral tx failed: %v", txErr)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل إلغاء الإحالة"})
+		return
+	}
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "أُلغيت الإحالة — الطلب في انتظار التوجيه"})
+}
+
 func RejectRequest(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := getUserID(r)

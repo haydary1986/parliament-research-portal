@@ -463,6 +463,17 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
     finally { setBusy(false) }
   }
 
+  const cancelReferral = async () => {
+    if (!(await confirmAction({ title: 'إلغاء الإحالة', message: 'سيعود الطلب إلى «انتظار التوجيه» لتعيد توجيهه. متاح فقط قبل أن يؤكّد رئيس القسم.', danger: true, confirmText: 'إلغاء الإحالة' }))) return
+    setBusy(true)
+    try {
+      await api.cancelReferral(d.id)
+      toast.success('أُلغيت الإحالة')
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
   const returnReq = async () => {
     if (!(await confirmAction({ title: 'لا يمكن التنفيذ', message: 'سيُرجَع الطلب للجهة الطالبة بوصفه غير قابل للتنفيذ (بحث موجود مسبقاً).', danger: true, confirmText: 'إرجاع' }))) return
     setBusy(true)
@@ -668,6 +679,11 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
                 {d.status === 'pending' && (
                   <button onClick={() => setShowReject((v) => !v)} disabled={busy} className="btn-outline flex-1 text-[var(--color-danger-700)]">
                     رفض الطلب
+                  </button>
+                )}
+                {d.status === 'assigned' && (
+                  <button onClick={cancelReferral} disabled={busy} className="btn-outline flex-1 text-[var(--color-danger-700)]">
+                    إلغاء الإحالة
                   </button>
                 )}
               </div>

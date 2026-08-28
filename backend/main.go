@@ -98,6 +98,7 @@ func main() {
 
 	// رفض الطلب قبل الإحالة (سبب إلزامي)
 	mux.Handle("PUT /api/requests/{id}/reject", role("manager")(http.HandlerFunc(handlers.RejectRequest)))
+	mux.Handle("PUT /api/requests/{id}/cancel-referral", role("manager")(http.HandlerFunc(handlers.CancelReferral)))
 
 	// =============================================
 	// Workflow الجديد (req.md)

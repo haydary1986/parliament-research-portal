@@ -229,6 +229,11 @@ export function getActivityLogs(params = {}) {
   return request('GET', `/activity-logs${query ? '?' + query : ''}`);
 }
 
+// إلغاء الإحالة (مدير الدائرة) — يعيد الطلب لانتظار التوجيه قبل تأكيد رئيس القسم
+export function cancelReferral(id) {
+  return request('PUT', `/requests/${id}/cancel-referral`);
+}
+
 // ========== Return Request (Manager) ==========
 export function returnRequest(id, data) {
   return request('PUT', `/requests/${id}/return`, data);
