@@ -7,6 +7,7 @@ import Modal from './components/ui/Modal'
 import EmptyState from './components/ui/EmptyState'
 import { PageLoader } from './components/ui/Spinner'
 import { useToast } from './components/ui/Toast'
+import { useConfirm } from './components/ui/ConfirmDialog'
 import {
   IconDashboard, IconResearch, IconMail, IconArchive, IconDocument,
   IconClock, IconCheck, IconPlus, IconUpload,
@@ -166,6 +167,7 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
   const [consentChoice, setConsentChoice] = useState('approved')
   const [consentNotes, setConsentNotes] = useState('')
   const toast = useToast()
+  const confirmAction = useConfirm()
 
   useEffect(() => {
     if (!task) { setDetail(null); return }
@@ -235,6 +237,8 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
   }
 
   const submitConsent = async () => {
+    const approve = consentChoice === 'approved'
+    if (!(await confirmAction({ title: 'قرار الأرشفة', message: approve ? 'ستوافق على إرسال البحث للمستودع الرقمي.' : 'سترفض أرشفة البحث في المستودع الرقمي.', confirmText: approve ? 'موافقة' : 'رفض', danger: !approve }))) return
     setBusy(true)
     try {
       await api.updateArchiveConsent(t.id, consentChoice, consentNotes)
@@ -294,10 +298,11 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
               <ResearchFileUpload task={t} onUploaded={reloadInPlace} />
               <div className="flex gap-3">
                 <button
-                  onClick={() => {
-                    if (!t.file_path) {
-                      if (!window.confirm('لم ترفع ملف البحث بعد. هل تريد التسليم بدون مرفق؟')) return
-                    }
+                  onClick={async () => {
+                    const msg = t.file_path
+                      ? 'سيُسلَّم البحث لرئيس القسم للمراجعة.'
+                      : 'لم ترفع ملف البحث بعد. هل تريد التسليم بدون مرفق؟'
+                    if (!(await confirmAction({ title: 'تسليم البحث للمراجعة', message: msg, danger: !t.file_path }))) return
                     updateStatus('submitted')
                   }}
                   disabled={busy}

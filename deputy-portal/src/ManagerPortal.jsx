@@ -9,6 +9,7 @@ import ResearchFiles from './components/ui/ResearchFiles'
 import Discussion from './components/ui/Discussion'
 import OperationsReport from './components/reports/OperationsReport'
 import { useToast } from './components/ui/Toast'
+import { useConfirm } from './components/ui/ConfirmDialog'
 import {
   IconDashboard, IconRequests, IconDocument, IconClock, IconCheck, IconActivity,
   IconSearch, IconBuilding, IconArchive, IconShield, IconUsers,
@@ -385,6 +386,7 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
   const [rejectReason, setRejectReason] = useState('')
   const [showReject, setShowReject] = useState(false)
   const toast = useToast()
+  const confirmAction = useConfirm()
 
   useEffect(() => {
     if (!request) { setDetail(null); return }
@@ -438,6 +440,7 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
 
   const assign = async () => {
     if (selectedDepts.length === 0) return toast.error('اختر قسماً واحداً على الأقل')
+    if (!(await confirmAction({ title: 'إحالة الطلب', message: `سيُحال الطلب إلى ${selectedDepts.length} قسم${assignResearchers.length ? ' مع اقتراح باحث' : ''} لاعتماد رئيس القسم.` }))) return
     setBusy(true)
     try {
       // الباحثون اقتراح غير مُلزِم فقط — رئيس القسم يعتمد ويحدّد تفاصيل الإعداد
@@ -450,6 +453,7 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
   }
 
   const sendToDeputy = async () => {
+    if (!(await confirmAction({ title: 'إرسال البحث للنائب', message: 'سيُرسَل البحث ذو الخصوصية إلى الجهة الطالبة. لا يمكن التراجع بعد الإرسال.' }))) return
     setBusy(true)
     try {
       await api.managerSendToDeputy(d.id)
@@ -460,6 +464,7 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
   }
 
   const returnReq = async () => {
+    if (!(await confirmAction({ title: 'لا يمكن التنفيذ', message: 'سيُرجَع الطلب للجهة الطالبة بوصفه غير قابل للتنفيذ (بحث موجود مسبقاً).', danger: true, confirmText: 'إرجاع' }))) return
     setBusy(true)
     try {
       await api.returnRequest(d.id, { reason: 'البحث موجود مسبقاً', notes: 'تم إرجاع الطلب' })
@@ -475,6 +480,7 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
   const rejectReq = async () => {
     const reason = rejectReason.trim()
     if (!reason) { toast.error('سبب الرفض مطلوب'); return }
+    if (!(await confirmAction({ title: 'رفض الطلب', message: 'سيُرفض الطلب نهائياً. هذا الإجراء لا يُنفَّذ إلا لطلب غير مختص.', danger: true, confirmText: 'رفض' }))) return
     setBusy(true)
     try {
       await api.rejectRequest(d.id, reason)

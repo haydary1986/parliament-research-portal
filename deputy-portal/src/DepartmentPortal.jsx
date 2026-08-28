@@ -8,6 +8,7 @@ import { PageLoader } from './components/ui/Spinner'
 import ResearchFiles from './components/ui/ResearchFiles'
 import Discussion from './components/ui/Discussion'
 import { useToast } from './components/ui/Toast'
+import { useConfirm } from './components/ui/ConfirmDialog'
 import {
   IconDashboard, IconRequests, IconResearch, IconProofread, IconUsers,
   IconDocument, IconClock, IconCheck, IconPlus, IconSearch,
@@ -327,6 +328,7 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
   const [reviewNotes, setReviewNotes] = useState('')
   const [reviewProofreader, setReviewProofreader] = useState('')
   const toast = useToast()
+  const confirmAction = useConfirm()
 
   useEffect(() => {
     if (!request) { setDetail(null); return }
@@ -361,6 +363,7 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
 
   const confirm = async () => {
     if (selectedResearchers.length === 0) return toast.error('اختر باحثاً واحداً على الأقل')
+    if (!(await confirmAction({ title: 'تأكيد الطلب وتعيين الباحث', message: `سيُعتمَد الطلب ويُسنَد إلى ${selectedResearchers.length} باحث ليبدأ العمل.` }))) return
     setBusy(true)
     try {
       await api.confirmRequest(d.id, {
@@ -379,6 +382,12 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
     if (reviewDecision === 'approve' && !reviewProofreader) {
       return toast.error('اختر المدقق اللغوي')
     }
+    const approve = reviewDecision === 'approve'
+    if (!(await confirmAction({
+      title: approve ? 'اعتماد البحث وإرساله للتدقيق' : 'إرجاع البحث للباحث',
+      message: approve ? 'سيُعتمَد البحث ويُحال إلى المدقق اللغوي.' : 'سيُرجَع البحث إلى الباحث للتعديل مع ملاحظاتك.',
+      danger: !approve, confirmText: approve ? 'اعتماد' : 'إرجاع',
+    }))) return
     setBusy(true)
     try {
       await api.deptHeadReview(d.id, reviewDecision, parseInt(reviewProofreader) || 0, reviewNotes)
@@ -389,7 +398,7 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
   }
 
   const sendToDeputy = async () => {
-    if (!confirm) return
+    if (!(await confirmAction({ title: 'إرسال البحث للنائب', message: 'سيُرسَل البحث المعتمد إلى الجهة الطالبة. لا يمكن التراجع بعد الإرسال.' }))) return
     setBusy(true)
     try {
       await api.deptSendToDeputy(d.id)
@@ -559,6 +568,7 @@ function ResearchTaskModal({ task, proofreaders, researchers = [], onClose, onCh
   const [showReassign, setShowReassign] = useState(false)
   const [busy, setBusy] = useState(false)
   const toast = useToast()
+  const confirmAction = useConfirm()
 
   useEffect(() => {
     setProofId('')
@@ -570,6 +580,7 @@ function ResearchTaskModal({ task, proofreaders, researchers = [], onClose, onCh
 
   const sendToProofreading = async () => {
     if (!proofId) return toast.error('اختر المدقق')
+    if (!(await confirmAction({ title: 'إرسال البحث للتدقيق اللغوي', message: 'سيُحال البحث إلى المدقق اللغوي المختار.' }))) return
     setBusy(true)
     try {
       await api.createProofreadingTask({ research_task_id: task.id, proofreader_id: parseInt(proofId) })
@@ -581,6 +592,7 @@ function ResearchTaskModal({ task, proofreaders, researchers = [], onClose, onCh
 
   const reassign = async () => {
     if (!newResearcherId) return toast.error('اختر الباحث البديل')
+    if (!(await confirmAction({ title: 'نقل المهمة لباحث بديل', message: 'ستُنقل المهمة بمحتواها كاملاً إلى الباحث البديل ويفقد الباحث الحالي الوصول إليها.', danger: true, confirmText: 'نقل' }))) return
     setBusy(true)
     try {
       const res = await api.reassignResearchTask(task.id, parseInt(newResearcherId), handoverNotes)

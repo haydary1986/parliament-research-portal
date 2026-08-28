@@ -7,6 +7,7 @@ import Modal from './components/ui/Modal'
 import EmptyState from './components/ui/EmptyState'
 import { PageLoader } from './components/ui/Spinner'
 import { useToast } from './components/ui/Toast'
+import { useConfirm } from './components/ui/ConfirmDialog'
 import {
   IconDashboard, IconProofread, IconClock, IconCheck, IconDocument,
 } from './components/icons/Icons'
@@ -147,11 +148,21 @@ function TaskModal({ task, onClose, onChanged }) {
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const toast = useToast()
+  const confirmAction = useConfirm()
 
   useEffect(() => { setNotes(task?.notes || '') }, [task])
   if (!task) return null
 
   const updateStatus = async (status) => {
+    const isDone = status === 'completed'
+    const isReturn = status === 'returned'
+    if (isDone || isReturn) {
+      if (!(await confirmAction({
+        title: isDone ? 'إتمام التدقيق اللغوي' : 'إرجاع البحث للباحث',
+        message: isDone ? 'سيُحال البحث إلى المعاون للتدقيق النهائي.' : 'سيُرجَع البحث إلى الباحث للتصحيح.',
+        danger: isReturn, confirmText: isDone ? 'إتمام' : 'إرجاع',
+      }))) return
+    }
     setBusy(true)
     try {
       await api.updateProofreadingStatus(task.id, { status, notes })

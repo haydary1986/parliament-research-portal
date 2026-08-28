@@ -8,6 +8,7 @@ import { PageLoader } from './components/ui/Spinner'
 import ResearchFiles from './components/ui/ResearchFiles'
 import Discussion from './components/ui/Discussion'
 import { useToast } from './components/ui/Toast'
+import { useConfirm } from './components/ui/ConfirmDialog'
 import {
   IconDashboard, IconShield, IconClock, IconCheck, IconDocument, IconActivity,
 } from './components/icons/Icons'
@@ -156,6 +157,7 @@ function ReviewModal({ request, onClose, onChanged }) {
   const [confidentiality, setConfidentiality] = useState('public')
   const [busy, setBusy] = useState(false)
   const toast = useToast()
+  const confirmAction = useConfirm()
 
   useEffect(() => {
     if (!request) { setDetail(null); return }
@@ -180,6 +182,12 @@ function ReviewModal({ request, onClose, onChanged }) {
   const d = detail || request
 
   const submit = async () => {
+    const approve = decision === 'approve'
+    if (!(await confirmAction({
+      title: approve ? 'اعتماد البحث نهائياً' : 'رفض البحث',
+      message: approve ? 'سيُعتمَد البحث ويُوجَّه للتسليم للجهة الطالبة.' : 'سيُرجَع البحث إلى الباحث للتعديل.',
+      danger: !approve, confirmText: approve ? 'اعتماد' : 'رفض',
+    }))) return
     setBusy(true)
     try {
       await api.assistantFinalReview(d.id, decision, notes, decision === 'approve' ? confidentiality : undefined)

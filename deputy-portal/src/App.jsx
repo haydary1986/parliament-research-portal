@@ -9,6 +9,7 @@ import SuperAdminPortal from './SuperAdminPortal'
 import { login as apiLogin, logout as apiLogout, setToken, getMe } from './api'
 import Spinner from './components/ui/Spinner'
 import { ToastProvider, useToast } from './components/ui/Toast'
+import { ConfirmProvider } from './components/ui/ConfirmDialog'
 import { IconMail, IconLock, IconEye, IconEyeOff, IconUser, IconDocument } from './components/icons/Icons'
 import StateEmblem from './components/national/StateEmblem'
 import CouncilLogo from './components/national/CouncilLogo'
@@ -452,7 +453,9 @@ function AppInner() {
 export default function App() {
   return (
     <ToastProvider>
-      <AppInner />
+      <ConfirmProvider>
+        <AppInner />
+      </ConfirmProvider>
     </ToastProvider>
   )
 }
