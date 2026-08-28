@@ -79,6 +79,12 @@ var (
 	// تُحقن من الـ handlers في main() لتفادي دورة استيراد،
 	// وبدونها تعود الرموز المسجَّل خروجها صالحة بعد كل نشر.
 	RevokedChecker func(token string) bool
+
+	// AccountChecker يعيد الدور الحالي وحالة النشاط للمستخدم من القاعدة.
+	// بدونه كان الرمز يبقى صالحاً حتى 8 ساعات بعد تعطيل الحساب، والدور
+	// يُؤخذ من الرمز فلا يسري تغيير الصلاحية إلا بعد انتهائه. تُحقن من
+	// الـ handlers لتفادي دورة الاستيراد.
+	AccountChecker func(userID int) (role string, active bool)
 )
 
 func BlacklistToken(tokenStr string, expiry time.Time) {
@@ -316,6 +322,19 @@ func Auth(next http.Handler) http.Handler {
 		dept := ""
 		if d, ok := claims["department"].(string); ok {
 			dept = d
+		}
+
+		// التحقّق من القاعدة عند كل طلب: يقطع وصول الحساب المعطَّل فوراً
+		// بدل انتظار انتهاء الرمز، ويحدّث الدور فيسري تغيير الصلاحية مباشرةً.
+		if AccountChecker != nil {
+			freshRole, active := AccountChecker(userID)
+			if !active {
+				http.Error(w, `{"success":false,"message":"الحساب معطَّل أو غير موجود"}`, http.StatusUnauthorized)
+				return
+			}
+			if freshRole != "" {
+				role = freshRole
+			}
 		}
 
 		ctx := context.WithValue(r.Context(), UserIDKey, userID)

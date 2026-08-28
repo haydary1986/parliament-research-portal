@@ -141,3 +141,16 @@ func FormatLockMessage(until time.Time) string {
 	mins := int(time.Until(until).Minutes()) + 1
 	return fmt.Sprintf("تم قفل الحساب مؤقتاً بعد محاولات فاشلة متكررة. حاول بعد %d دقيقة", mins)
 }
+
+// CurrentAccount يعيد الدور الحالي وحالة النشاط للمستخدم من القاعدة.
+// يُحقن في middleware.AccountChecker ليُبطِل جلسة الحساب المعطَّل فوراً
+// ويجعل تغيير الدور يسري دون انتظار انتهاء الرمز.
+func CurrentAccount(userID int) (string, bool) {
+	var role, status string
+	if err := db.DB.QueryRow(
+		"SELECT role, status FROM users WHERE id = ?", userID,
+	).Scan(&role, &status); err != nil {
+		return "", false // غير موجود ⇒ غير نشط
+	}
+	return role, status == "active"
+}

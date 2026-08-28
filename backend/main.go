@@ -43,6 +43,7 @@ func main() {
 	// القائمة السوداء الدائمة: تُحقن هنا لتفادي دورة استيراد بين
 	// middleware و handlers، وبدونها تعود الرموز الملغاة صالحة بعد كل نشر
 	middleware.RevokedChecker = handlers.IsTokenRevoked
+	middleware.AccountChecker = handlers.CurrentAccount
 	handlers.StartTokenCleanup()
 	handlers.PurgeExpiredTokens()
 

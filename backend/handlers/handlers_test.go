@@ -335,3 +335,47 @@ func TestIsForeignKeyViolation(t *testing.T) {
 		t.Error("nil صُنِّف انتهاكاً")
 	}
 }
+
+// =============================================
+// إبطال الجلسة عند تعطيل الحساب (اكتُشف بالفحص الأمني)
+//
+// كان الرمز يبقى صالحاً حتى 8 ساعات بعد تعطيل الحساب لأن المصادقة تثق
+// بادعاءات الرمز دون مراجعة القاعدة.
+// =============================================
+
+func TestCurrentAccountReflectsStatus(t *testing.T) {
+	// مستخدم نشط
+	res, err := db.DB.Exec(
+		`INSERT INTO users (name, email, password_hash, role, status)
+		 VALUES ('اختبار الجلسة', 'sessiontest@parliament.iq', 'x', 'researcher', 'active')`)
+	if err != nil {
+		t.Fatalf("تعذّر إنشاء المستخدم: %v", err)
+	}
+	id64, _ := res.LastInsertId()
+	id := int(id64)
+	defer db.DB.Exec("DELETE FROM users WHERE id = ?", id)
+
+	role, active := CurrentAccount(id)
+	if !active || role != "researcher" {
+		t.Errorf("الحساب النشط: توقعت (researcher, true) وحصلت على (%q, %v)", role, active)
+	}
+
+	// بعد التعطيل
+	if _, err := db.DB.Exec("UPDATE users SET status = 'inactive' WHERE id = ?", id); err != nil {
+		t.Fatal(err)
+	}
+	if _, active := CurrentAccount(id); active {
+		t.Error("الحساب المعطَّل ما زال يُعَدّ نشطاً — الجلسة لن تُقطع")
+	}
+
+	// تغيير الدور يسري
+	db.DB.Exec("UPDATE users SET status = 'active', role = 'manager' WHERE id = ?", id)
+	if role, _ := CurrentAccount(id); role != "manager" {
+		t.Errorf("تغيير الدور لم يُقرأ من القاعدة: %q", role)
+	}
+
+	// مستخدم غير موجود ⇒ غير نشط
+	if _, active := CurrentAccount(999999); active {
+		t.Error("مستخدم غير موجود عُدّ نشطاً")
+	}
+}
