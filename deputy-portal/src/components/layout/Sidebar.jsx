@@ -12,7 +12,7 @@ export default function Sidebar({ items, activeKey, onNavigate, user, onLogout, 
         </div>
         {/* زر إغلاق للهاتف فقط */}
         {onClose && (
-          <button onClick={onClose} className="md:hidden p-1.5 rounded-lg text-white/70 hover:bg-white/10" aria-label="إغلاق القائمة">
+          <button onClick={onClose} className="sidebar-touch md:hidden flex items-center justify-center p-1.5 rounded-lg text-white/70 hover:bg-white/10" aria-label="إغلاق القائمة">
             <IconX className="w-5 h-5" />
           </button>
         )}
@@ -60,7 +60,7 @@ export default function Sidebar({ items, activeKey, onNavigate, user, onLogout, 
           </div>
           <button
             onClick={onLogout}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-[var(--color-navy-200)] hover:bg-[var(--color-danger-600)]/20 hover:text-white transition-colors"
+            className="sidebar-touch w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs text-[var(--color-navy-200)] hover:bg-[var(--color-danger-600)]/20 hover:text-white transition-colors"
           >
             <IconLogout className="w-4 h-4" />
             <span>تسجيل الخروج</span>

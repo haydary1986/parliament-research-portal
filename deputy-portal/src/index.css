@@ -666,6 +666,13 @@ label:focus-within {
   .btn-danger, .btn-success, .btn-icon, .hamburger {
     min-height: 2.75rem;
   }
+  /* الأزرار الأيقونية ضيّقة بطبيعتها: الارتفاع وحده لا يكفي —
+     كانت 36×44 و38×44 أي دون 44×44 المطلوبة عرضاً */
+  .btn-icon, .hamburger, .touch-target {
+    min-width: 2.75rem;
+  }
+  /* عناصر القائمة الجانبية خارج أصناف الأزرار، فتُضبط صراحةً */
+  .sidebar-touch { min-height: 2.75rem; min-width: 2.75rem; }
   .btn-sm { min-height: 2.5rem; }
   .input, .select, .textarea { min-height: 2.75rem; }
   /* الروابط النصية داخل الفقرات تحتاج مساحة لمس مريحة */
