@@ -122,9 +122,16 @@ func MarkNotificationRead(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	userID := getUserID(r)
 
-	if _, err := db.DB.Exec(
-		"UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?", id, userID); err != nil {
+	res, err := db.DB.Exec(
+		"UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?", id, userID)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل تحديث الإشعار"})
+		return
+	}
+	// الاستعلام مقيَّد بصاحب الإشعار، فصفر صفوف يعني أنه غير موجود أو ليس له.
+	// كان الرد نجاحاً في الحالتين — يخفي الخطأ عن العميل.
+	if n, _ := res.RowsAffected(); n == 0 {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الإشعار غير موجود"})
 		return
 	}
 

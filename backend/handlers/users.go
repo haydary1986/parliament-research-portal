@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -215,9 +216,17 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	`, sanitize(input.Name), sanitize(input.Email), passwordHash, input.Role,
 		input.DepartmentID, requesterType, primaryCommittee, sanitizePtr(input.Phone))
 
+	if isUniqueViolation(err) {
+		// تكرار البريد خطأ عميل لا عطل خادم
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "البريد الإلكتروني مستخدم سلفاً",
+		})
+		return
+	}
 	if err != nil {
+		log.Printf("CreateUser INSERT failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{
-			Success: false, Message: "فشل إنشاء المستخدم - قد يكون البريد مكرراً",
+			Success: false, Message: "فشل إنشاء المستخدم",
 		})
 		return
 	}

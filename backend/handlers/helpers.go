@@ -342,6 +342,25 @@ const (
 	ConfidentialityConfidential = "confidential"
 )
 
+// isUniqueViolation يميّز خطأ تكرار مفتاح فريد عن أي فشل آخر في القاعدة.
+// بدونه يعود 500 لما هو في حقيقته خطأ عميل (بريد أو معرّف مستخدَم سلفاً).
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint failed") ||
+		strings.Contains(msg, "constraint failed: unique")
+}
+
+// isForeignKeyViolation يميّز الإشارة إلى صفّ غير موجود.
+func isForeignKeyViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "foreign key constraint failed")
+}
+
 // أنواع الخدمة والتصنيفات — مطابقة لقيود CHECK على request_confirmations.
 // كانت تُفحص للفراغ فقط ثم تُمرَّر للقاعدة، فأي قيمة أخرى تُفجّر القيد
 // داخل INSERT ويعود 500 «فشل إحالة الطلب» بلا بيان السبب.

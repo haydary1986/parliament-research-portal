@@ -376,6 +376,26 @@ func CreateProofreadingTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// التحقّق من وجود المرجعين قبل الإدراج: بدونه ينفجر قيد المفتاح الأجنبي
+	// داخل المعاملة ويعود 500 على ما هو خطأ عميل
+	var rtExists int
+	logErr("CreateProofreadingTask research_task",
+		db.DB.QueryRow("SELECT COUNT(*) FROM research_tasks WHERE id = ?", input.ResearchTaskID).Scan(&rtExists))
+	if rtExists == 0 {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "مهمة البحث غير موجودة"})
+		return
+	}
+	var proofRole string
+	if err := db.DB.QueryRow(
+		"SELECT role FROM users WHERE id = ? AND status = 'active'", input.ProofreaderID).Scan(&proofRole); err != nil {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "المدقق المختار غير موجود أو غير نشط"})
+		return
+	}
+	if proofRole != "proofreader" {
+		writeJSON(w, http.StatusBadRequest, models.APIResponse{Success: false, Message: "المستخدم المختار ليس مدققاً لغوياً"})
+		return
+	}
+
 	ptID := generateID("PT")
 	var userName string
 	logErr("CreateProofreadingTask userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))

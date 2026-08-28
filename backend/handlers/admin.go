@@ -185,8 +185,16 @@ func CreateDepartment(w http.ResponseWriter, r *http.Request) {
 		"INSERT INTO departments (id, name, head_name, color) VALUES (?, ?, ?, ?)",
 		input.ID, input.Name, sanitize(input.HeadName), color,
 	); err != nil {
+		// معرّف مستخدَم سلفاً خطأ عميل لا عطل خادم
+		if isUniqueViolation(err) {
+			writeJSON(w, http.StatusConflict, models.APIResponse{
+				Success: false, Message: "معرّف القسم مستخدم سلفاً",
+			})
+			return
+		}
+		log.Printf("CreateDepartment INSERT failed: %v", err)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{
-			Success: false, Message: "فشل إنشاء القسم — قد يكون المعرّف مستخدماً",
+			Success: false, Message: "فشل إنشاء القسم",
 		})
 		return
 	}

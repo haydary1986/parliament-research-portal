@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -299,5 +300,38 @@ func TestValidateConfirmation(t *testing.T) {
 		if msg := validateConfirmation("دراسة", "علمي", d); msg == "" {
 			t.Errorf("مدة إنجاز غير منطقية قُبلت: %d", d)
 		}
+	}
+}
+
+// =============================================
+// تمييز أخطاء العميل عن أعطال الخادم
+//
+// كان تكرار البريد أو معرّف القسم يعود 500، والإشارة لصفّ غير موجود كذلك.
+// =============================================
+
+func TestIsUniqueViolation(t *testing.T) {
+	if !isUniqueViolation(errors.New("UNIQUE constraint failed: users.email")) {
+		t.Error("لم يُميَّز تكرار البريد")
+	}
+	if !isUniqueViolation(errors.New("constraint failed: UNIQUE constraint failed: departments.id")) {
+		t.Error("لم يُميَّز تكرار معرّف القسم")
+	}
+	if isUniqueViolation(errors.New("database is locked")) {
+		t.Error("عطل خادم صُنِّف خطأ عميل")
+	}
+	if isUniqueViolation(nil) {
+		t.Error("nil صُنِّف انتهاكاً")
+	}
+}
+
+func TestIsForeignKeyViolation(t *testing.T) {
+	if !isForeignKeyViolation(errors.New("FOREIGN KEY constraint failed")) {
+		t.Error("لم يُميَّز انتهاك المفتاح الأجنبي")
+	}
+	if isForeignKeyViolation(errors.New("no such table: x")) {
+		t.Error("خطأ آخر صُنِّف انتهاك مفتاح")
+	}
+	if isForeignKeyViolation(nil) {
+		t.Error("nil صُنِّف انتهاكاً")
 	}
 }
