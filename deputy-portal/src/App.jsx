@@ -9,9 +9,10 @@ import SuperAdminPortal from './SuperAdminPortal'
 import { login as apiLogin, logout as apiLogout, setToken, getMe } from './api'
 import Spinner from './components/ui/Spinner'
 import { ToastProvider, useToast } from './components/ui/Toast'
-import { IconMail, IconLock, IconEye, IconEyeOff, IconUser } from './components/icons/Icons'
+import { IconMail, IconLock, IconEye, IconEyeOff, IconUser, IconDocument } from './components/icons/Icons'
 import StateEmblem from './components/national/StateEmblem'
 import CouncilLogo from './components/national/CouncilLogo'
+import WorkflowGuide from './components/WorkflowGuide'
 import IraqFlag, { FlagStripe } from './components/national/IraqFlag'
 import IslamicPattern from './components/national/IslamicPattern'
 import BaghdadSkyline from './components/national/BaghdadSkyline'
@@ -91,7 +92,7 @@ const DEMO_GROUPS = [
   },
 ]
 
-function LoginPage({ onSuccess }) {
+function LoginPage({ onSuccess, onShowGuide }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -332,7 +333,18 @@ function LoginPage({ onSuccess }) {
 
             {/* مسار الخدمة البحثية */}
             <section className="p-5 rounded-2xl bg-white/[0.06] backdrop-blur border border-white/10">
-              <h2 className="text-sm font-bold text-[var(--color-gold-300)] mb-4">مسار الخدمة البحثية</h2>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h2 className="text-sm font-bold text-[var(--color-gold-300)]">مسار الخدمة البحثية</h2>
+                {onShowGuide && (
+                  <button
+                    onClick={onShowGuide}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-gold-500)] text-[var(--color-navy-950)] text-xs font-bold hover:bg-[var(--color-gold-400)] transition-colors"
+                  >
+                    <IconDocument className="w-4 h-4" aria-hidden="true" />
+                    <span>الدليل الكامل</span>
+                  </button>
+                )}
+              </div>
               <ol className="space-y-2.5">
                 {SERVICE_JOURNEY.map((s, i) => (
                   <li key={s.step} className="flex items-center gap-3">
@@ -424,7 +436,9 @@ function AppInner() {
     )
   }
 
-  if (view === 'login') return <LoginPage onSuccess={handleSuccess} />
+  // دليل سير العمل — يُفتح من الرئيسية ويعود إليها
+  if (view === 'guide') return <WorkflowGuide onBack={() => setView('login')} />
+  if (view === 'login') return <LoginPage onSuccess={handleSuccess} onShowGuide={() => setView('guide')} />
   if (view === 'deputy') return <DeputyPortal user={user} onLogout={handleLogout} />
   if (view === 'manager') return <ManagerPortal user={user} onLogout={handleLogout} />
   if (view === 'department') return <DepartmentPortal user={user} onLogout={handleLogout} />
