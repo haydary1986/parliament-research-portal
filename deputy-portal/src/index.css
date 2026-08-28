@@ -673,6 +673,7 @@ label:focus-within {
   }
   /* عناصر القائمة الجانبية خارج أصناف الأزرار، فتُضبط صراحةً */
   .sidebar-touch { min-height: 2.75rem; min-width: 2.75rem; }
+  .nav-link, .nav-link-active { min-height: 2.75rem; }
   .btn-sm { min-height: 2.5rem; }
   .input, .select, .textarea { min-height: 2.75rem; }
   /* الروابط النصية داخل الفقرات تحتاج مساحة لمس مريحة */
