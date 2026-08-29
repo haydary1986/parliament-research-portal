@@ -178,25 +178,29 @@ export default function OperationsReport() {
 function DistributionCard({ title, data, labels }) {
   const entries = Object.entries(data || {}).sort((a, b) => b[1] - a[1])
   const max = entries.length ? entries[0][1] : 1
+  const total = entries.reduce((a, [, n]) => a + n, 0) || 1
   if (entries.length === 0) return null
   return (
     <div className="card">
       <div className="card-header"><h3 className="card-title">{title}</h3></div>
       <div className="p-4 space-y-2.5">
-        {entries.map(([key, n]) => (
-          <div key={key}>
-            <div className="flex items-center justify-between text-sm mb-1 gap-2">
-              <span className="font-medium text-[var(--color-navy-800)] truncate">{labels?.[key] || key}</span>
-              <span className="text-[var(--color-navy-600)] font-mono">{n}</span>
+        {entries.map(([key, n]) => {
+          const pct = Math.round((n / total) * 100)
+          return (
+            <div key={key}>
+              <div className="flex items-center justify-between text-sm mb-1 gap-2">
+                <span className="font-medium text-[var(--color-navy-800)] truncate">{labels?.[key] || key}</span>
+                <span className="text-[var(--color-navy-600)] font-mono tabular-nums">{n} <span className="text-[var(--color-navy-400)]">({pct}%)</span></span>
+              </div>
+              <div className="h-2 bg-[var(--color-surface-soft)] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-l from-[var(--color-gold-500)] to-[var(--color-gold-700)] rounded-full"
+                  style={{ width: `${(n / max) * 100}%` }}
+                />
+              </div>
             </div>
-            <div className="h-2 bg-[var(--color-surface-soft)] rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-l from-[var(--color-gold-500)] to-[var(--color-gold-700)] rounded-full"
-                style={{ width: `${(n / max) * 100}%` }}
-              />
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
