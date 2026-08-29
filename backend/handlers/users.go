@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -210,52 +211,65 @@ func CreateUser(w http.ResponseWriter, r *http.Request) {
 	// نوع الجهة الطالبة يخص الأدوار الطالبة فقط (role='deputy')
 	requesterType := normalizeRequesterType(input.RequesterType)
 
-	result, err := db.DB.Exec(`
-		INSERT INTO users (name, email, password_hash, role, department_id, requester_type, committee, phone, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-	`, sanitize(input.Name), sanitize(input.Email), passwordHash, input.Role,
-		input.DepartmentID, requesterType, primaryCommittee, sanitizePtr(input.Phone))
+	// إنشاء المستخدم ولجانه وصلاحياته في معاملة واحدة ذرّية.
+	// بدونها كان فشل جزئي (تحت ضغط القاعدة) يترك حساباً بلا صلاحيات بينما
+	// يُبلَّغ النجاح — مثلاً رئيس قسم جديد بلا أي صلاحية.
+	var userID int64
+	var dup bool
+	txErr := withTx(func(tx *sql.Tx) error {
+		result, err := tx.Exec(`
+			INSERT INTO users (name, email, password_hash, role, department_id, requester_type, committee, phone, status)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+		`, sanitize(input.Name), sanitize(input.Email), passwordHash, input.Role,
+			input.DepartmentID, requesterType, primaryCommittee, sanitizePtr(input.Phone))
+		if isUniqueViolation(err) {
+			dup = true
+			return errStateConflict
+		}
+		if err != nil {
+			return fmt.Errorf("INSERT user: %w", err)
+		}
+		userID, _ = result.LastInsertId()
 
-	if isUniqueViolation(err) {
-		// تكرار البريد خطأ عميل لا عطل خادم
+		for i, c := range committees {
+			c = sanitize(c)
+			if c == "" {
+				continue
+			}
+			isPrimary := 0
+			if i == 0 {
+				isPrimary = 1
+			}
+			if _, err := tx.Exec(
+				"INSERT OR IGNORE INTO user_committees (user_id, committee, is_primary) VALUES (?, ?, ?)",
+				userID, c, isPrimary,
+			); err != nil {
+				return fmt.Errorf("INSERT user_committee: %w", err)
+			}
+		}
+		for _, perm := range input.Permissions {
+			if _, err := tx.Exec(`
+				INSERT OR IGNORE INTO user_permissions (user_id, permission_id)
+				SELECT ?, id FROM permissions WHERE name = ?
+			`, userID, perm); err != nil {
+				return fmt.Errorf("INSERT user_permission: %w", err)
+			}
+		}
+		return nil
+	})
+
+	if dup {
 		writeJSON(w, http.StatusConflict, models.APIResponse{
 			Success: false, Message: "البريد الإلكتروني مستخدم سلفاً",
 		})
 		return
 	}
-	if err != nil {
-		log.Printf("CreateUser INSERT failed: %v", err)
+	if txErr != nil {
+		log.Printf("CreateUser tx failed: %v", txErr)
 		writeJSON(w, http.StatusInternalServerError, models.APIResponse{
 			Success: false, Message: "فشل إنشاء المستخدم",
 		})
 		return
-	}
-
-	userID, _ := result.LastInsertId()
-
-	// إدخال كل اللجان في user_committees
-	for i, c := range committees {
-		c = sanitize(c)
-		if c == "" {
-			continue
-		}
-		isPrimary := 0
-		if i == 0 {
-			isPrimary = 1
-		}
-		_, err := db.DB.Exec(
-			"INSERT OR IGNORE INTO user_committees (user_id, committee, is_primary) VALUES (?, ?, ?)",
-			userID, c, isPrimary,
-		)
-		logErr("INSERT user_committee", err)
-	}
-
-	// إضافة الصلاحيات
-	for _, perm := range input.Permissions {
-		db.DB.Exec(`
-			INSERT OR IGNORE INTO user_permissions (user_id, permission_id)
-			SELECT ?, id FROM permissions WHERE name = ?
-		`, userID, perm)
 	}
 
 	adminID := getUserID(r)

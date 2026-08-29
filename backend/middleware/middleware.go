@@ -172,13 +172,16 @@ func cleanupExpiredTokens() {
 func CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		allowedOrigins := map[string]bool{
-			"http://localhost:5173":  true,
-			"https://localhost:5173": true,
-			"http://localhost:3000":  true,
-			"https://localhost:3000": true,
+		allowedOrigins := map[string]bool{}
+		// أصول التطوير (localhost) تُسمح فقط خارج الإنتاج — لا تُترك سطحاً
+		// زائداً على الخادم الرسمي.
+		if os.Getenv("GO_ENV") != "production" {
+			allowedOrigins["http://localhost:5173"] = true
+			allowedOrigins["https://localhost:5173"] = true
+			allowedOrigins["http://localhost:3000"] = true
+			allowedOrigins["https://localhost:3000"] = true
 		}
-		// في الإنتاج: أضف الدومين الحقيقي
+		// الدومين الحقيقي من البيئة
 		if prodOrigin := os.Getenv("ALLOWED_ORIGIN"); prodOrigin != "" {
 			allowedOrigins[prodOrigin] = true
 		}

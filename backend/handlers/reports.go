@@ -110,13 +110,15 @@ func GetOperationsReport(w http.ResponseWriter, r *http.Request) {
 	`).Scan(&rep.AvgDays))
 
 	// حِمل الأقسام
+	// دالة تطابق القسم: رئيسي أو ضمن الإحالة متعددة الأقسام — لتوحيد العدّ
+	// مع لوحة الأقسام وشمول الطلبات المُحالة للقسم كهدف ثانوي.
 	if rows, err := db.DB.Query(`
 		SELECT d.id, d.name,
-		  (SELECT COUNT(*) FROM requests q WHERE q.assigned_department = d.id
+		  (SELECT COUNT(*) FROM requests q WHERE (q.assigned_department = d.id OR q.id IN (SELECT request_id FROM request_departments WHERE department_id = d.id))
 		     AND q.status NOT IN ('delivered','completed','returned_exists','rejected','withdrawn')),
-		  (SELECT COUNT(*) FROM requests q WHERE q.assigned_department = d.id
+		  (SELECT COUNT(*) FROM requests q WHERE (q.assigned_department = d.id OR q.id IN (SELECT request_id FROM request_departments WHERE department_id = d.id))
 		     AND q.status IN ('delivered','completed')),
-		  (SELECT COUNT(*) FROM requests q WHERE q.assigned_department = d.id
+		  (SELECT COUNT(*) FROM requests q WHERE (q.assigned_department = d.id OR q.id IN (SELECT request_id FROM request_departments WHERE department_id = d.id))
 		     AND q.deadline IS NOT NULL AND q.deadline < CURRENT_TIMESTAMP
 		     AND q.status NOT IN ('delivered','completed','returned_exists','rejected','withdrawn')),
 		  (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id AND u.role = 'researcher'),
