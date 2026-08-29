@@ -17,7 +17,7 @@ import {
 } from './components/icons/Icons'
 import {
   formatDate, PURPOSE_LABELS, MANAGER_DASHBOARD_LABELS,
-  CONFIDENTIALITY_LABELS, REQUESTER_TYPES,
+  CONFIDENTIALITY_LABELS, REQUESTER_TYPES, deadlineInfo,
 } from './lib/format'
 import { COMMITTEES } from './lib/committees'
 import * as api from './api'
@@ -191,10 +191,17 @@ function RequestsTable({ rows, departments, onOpen, withFilter = false, emptyTex
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [deptFilter, setDeptFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [committeeFilter, setCommitteeFilter] = useState('')
+  const [overdueOnly, setOverdueOnly] = useState(false)
 
   const filtered = rows.filter((r) => {
     if (statusFilter && r.status !== statusFilter) return false
-    if (deptFilter && r.assigned_department !== deptFilter) return false
+    // القسم: رئيسي أو ضمن الإحالة متعددة الأقسام
+    if (deptFilter && r.assigned_department !== deptFilter && !(r.assigned_departments || []).includes(deptFilter)) return false
+    if (typeFilter && r.requester_type !== typeFilter) return false
+    if (committeeFilter && !(r.committee || '').includes(committeeFilter)) return false
+    if (overdueOnly && deadlineInfo(r.deadline, r.status)?.state !== 'overdue') return false
     if (search) {
       const q = search.toLowerCase()
       return r.title?.toLowerCase().includes(q) || r.id?.toLowerCase().includes(q) || r.deputy_name?.toLowerCase().includes(q)
@@ -202,27 +209,61 @@ function RequestsTable({ rows, departments, onOpen, withFilter = false, emptyTex
     return true
   })
 
+  const activeFilters = statusFilter || deptFilter || typeFilter || committeeFilter || overdueOnly || search
+
   return (
     <div className="space-y-4">
       {withFilter && (
-        <div className="card p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="relative">
-            <IconSearch className="w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-navy-400)]" />
-            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="بحث..." className="input input-with-icon" />
+        <div className="card p-4 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="relative">
+              <IconSearch className="w-5 h-5 absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-navy-400)]" />
+              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="بحث بالعنوان أو الرقم أو الطالب..." className="input input-with-icon" />
+            </div>
+            <select className="select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="">جميع الحالات</option>
+              <option value="pending">انتظار التوجيه</option>
+              <option value="assigned">محال إلى القسم</option>
+              <option value="in_progress">قيد الإعداد</option>
+              <option value="pending_dept_review">مراجعة رئيس القسم</option>
+              <option value="proofreading">قيد التدقيق اللغوي</option>
+              <option value="pending_assistant">بانتظار المعاون</option>
+              <option value="pending_dept_send">جاهز للإرسال</option>
+              <option value="pending_manager_send">جاهز للإرسال (خصوصية)</option>
+              <option value="delivered">مُسلَّم</option>
+              <option value="completed">مكتمل</option>
+              <option value="returned_exists">لا يمكن التنفيذ</option>
+              <option value="rejected">مرفوض</option>
+              <option value="withdrawn">مسحوب</option>
+            </select>
+            <select className="select" value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
+              <option value="">جميع الأقسام</option>
+              {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+            <select className="select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+              <option value="">كل الجهات الطالبة</option>
+              {Object.entries(REQUESTER_TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <select className="select" value={committeeFilter} onChange={(e) => setCommitteeFilter(e.target.value)}>
+              <option value="">كل اللجان</option>
+              {COMMITTEES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <label className="flex items-center gap-2 px-3 rounded-lg border border-[var(--color-border)] cursor-pointer select-none">
+              <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="w-4 h-4" />
+              <span className="text-sm font-medium text-[var(--color-danger-700)]">المتأخّرة فقط</span>
+            </label>
           </div>
-          <select className="select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="">جميع الحالات</option>
-            <option value="pending">قيد الانتظار</option>
-            <option value="assigned">محال إلى القسم</option>
-            <option value="in_progress">قيد التنفيذ</option>
-            <option value="proofreading">قيد التدقيق</option>
-            <option value="under_manager_review">مراجعة نهائية</option>
-            <option value="completed">مكتمل</option>
-          </select>
-          <select className="select" value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}>
-            <option value="">جميع الأقسام</option>
-            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          <div className="flex items-center justify-between text-xs text-[var(--color-navy-500)]">
+            <span>عدد النتائج: <strong className="text-[var(--color-navy-800)]">{filtered.length}</strong> من {rows.length}</span>
+            {activeFilters && (
+              <button
+                onClick={() => { setSearch(''); setStatusFilter(''); setDeptFilter(''); setTypeFilter(''); setCommitteeFilter(''); setOverdueOnly(false) }}
+                className="text-[var(--color-gold-700)] font-semibold hover:underline"
+              >
+                مسح الفلاتر
+              </button>
+            )}
+          </div>
         </div>
       )}
 
