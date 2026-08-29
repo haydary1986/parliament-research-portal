@@ -20,6 +20,7 @@ import {
   CONFIDENTIALITY_LABELS, REQUESTER_TYPES, deadlineInfo,
 } from './lib/format'
 import { COMMITTEES } from './lib/committees'
+import { printOfficialRequest } from './lib/printRequest'
 import * as api from './api'
 
 export default function ManagerPortal({ user, onLogout }) {
@@ -455,6 +456,12 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
   if (!request) return null
   const d = detail || request
 
+  const exportPdf = async () => {
+    let timeline = []
+    try { const r = await api.getRequestTimeline(request.id); if (r.success) timeline = r.data || [] } catch { /* غير حرِج */ }
+    if (!printOfficialRequest(d, timeline)) toast.error('يرجى السماح بالنوافذ المنبثقة لتصدير الوثيقة')
+  }
+
   // الباحثون المتاحون = المنتمون للأقسام المحددة حالياً
   const eligibleResearchers = researchers.filter(
     (r) => r.department_id && selectedDepts.includes(r.department_id) && r.status === 'active'
@@ -562,7 +569,13 @@ function RequestDetailModal({ request, departments, researchers = [], onClose, o
               <h3 className="text-lg font-bold text-[var(--color-navy-900)]">{d.title}</h3>
               <p className="text-sm text-[var(--color-navy-600)] mt-1">{d.description}</p>
             </div>
-            <StatusBadge status={d.status} />
+            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+              <StatusBadge status={d.status} />
+              <button onClick={exportPdf} className="btn-outline btn-sm">
+                <IconDocument className="w-4 h-4" />
+                تصدير PDF رسمي
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4 p-4 bg-[var(--color-surface-soft)] rounded-xl">

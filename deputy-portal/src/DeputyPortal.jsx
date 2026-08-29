@@ -18,6 +18,7 @@ import {
   CONFIDENTIALITY_LABELS,
 } from './lib/format'
 import { COMMITTEES } from './lib/committees'
+import { printOfficialRequest } from './lib/printRequest'
 import * as api from './api'
 
 export default function DeputyPortal({ user, onLogout }) {
@@ -448,6 +449,16 @@ function RequestDetailModal({ request, onClose, onChanged }) {
     onChanged?.()
   }
 
+  const exportPdf = async () => {
+    let timeline = []
+    try {
+      const r = await api.getRequestTimeline(request.id)
+      if (r.success) timeline = r.data || []
+    } catch { /* السجل غير حرِج للتصدير */ }
+    const opened = printOfficialRequest(detail || request, timeline)
+    if (!opened) toast.error('يرجى السماح بالنوافذ المنبثقة لتصدير الوثيقة')
+  }
+
   useEffect(() => {
     if (!request) return
     let cancelled = false
@@ -475,7 +486,13 @@ function RequestDetailModal({ request, onClose, onChanged }) {
               <h3 className="text-lg font-bold text-[var(--color-navy-900)]">{d.title}</h3>
               <p className="text-sm text-[var(--color-navy-600)] mt-1">{d.description || 'لا يوجد وصف'}</p>
             </div>
-            <StatusBadge status={d.status} />
+            <div className="flex flex-col items-end gap-2 flex-shrink-0">
+              <StatusBadge status={d.status} />
+              <button onClick={exportPdf} className="btn-outline btn-sm">
+                <IconDocument className="w-4 h-4" />
+                تصدير PDF رسمي
+              </button>
+            </div>
           </div>
 
           {/* عرض المراحل التفصيلية للنائب (نقطة 5 من بوابة النواب) */}
