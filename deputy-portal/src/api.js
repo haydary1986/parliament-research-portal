@@ -218,6 +218,11 @@ export function exportRequests() {
   return request('GET', '/reports/requests-export');
 }
 
+// سجل قرارات الطلب (من فعل ماذا ومتى)
+export function getRequestTimeline(id) {
+  return request('GET', `/requests/${id}/timeline`);
+}
+
 // ========== Notes ==========
 export function createNote(data) {
   return request('POST', '/notes', data);

@@ -1163,3 +1163,49 @@ func ConfirmRequest(w http.ResponseWriter, r *http.Request) {
 		Success: true, Message: "تم تأكيد الطلب وتعيين الباحثين بنجاح",
 	})
 }
+
+// GET /api/requests/{id}/timeline - سجل قرارات الطلب (من سجل النشاط).
+// يعرض «من فعل ماذا ومتى» عبر مراحل الطلب. متاح لكل من يملك الوصول للطلب.
+func GetRequestTimeline(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+	role := getUserRole(r)
+
+	// الطلب موجود؟
+	var exists int
+	if err := db.DB.QueryRow("SELECT COUNT(*) FROM requests WHERE id = ?", id).Scan(&exists); err != nil || exists == 0 {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "الطلب غير موجود"})
+		return
+	}
+	if !canAccessRequest(id, userID, role) {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بعرض سجل هذا الطلب"})
+		return
+	}
+
+	rows, err := db.DB.Query(`
+		SELECT action, COALESCE(user_name, ''), COALESCE(details, ''), created_at
+		FROM activity_logs
+		WHERE entity_type = 'request' AND entity_id = ?
+		ORDER BY created_at ASC, id ASC
+	`, id)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "خطأ في جلب السجل"})
+		return
+	}
+	defer rows.Close()
+
+	type entry struct {
+		Action    string `json:"action"`
+		UserName  string `json:"user_name"`
+		Details   string `json:"details"`
+		CreatedAt string `json:"created_at"`
+	}
+	timeline := []entry{}
+	for rows.Next() {
+		var e entry
+		if rows.Scan(&e.Action, &e.UserName, &e.Details, &e.CreatedAt) == nil {
+			timeline = append(timeline, e)
+		}
+	}
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Data: timeline})
+}

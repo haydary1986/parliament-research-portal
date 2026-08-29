@@ -7,6 +7,7 @@ import EmptyState from './components/ui/EmptyState'
 import { PageLoader } from './components/ui/Spinner'
 import ResearchFiles from './components/ui/ResearchFiles'
 import Discussion from './components/ui/Discussion'
+import RequestTimeline from './components/ui/RequestTimeline'
 import { useToast } from './components/ui/Toast'
 import {
   IconDashboard, IconRequests, IconPlus, IconDocument, IconClock,
@@ -516,6 +517,11 @@ function RequestDetailModal({ request, onClose, onChanged }) {
               ? 'لم يُرفق ملف بهذا البحث — راجع دائرة البحوث'
               : 'سيظهر ملف البحث هنا فور تسليمه'}
           />
+
+          <div className="card p-4">
+            <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">سجل القرارات</h4>
+            <RequestTimeline requestId={d.id} />
+          </div>
 
           <Discussion
             entityType="request"

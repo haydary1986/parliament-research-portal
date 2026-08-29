@@ -83,6 +83,7 @@ func main() {
 	// عرض: النائب يرى طلباته، المدير يرى الكل، القسم يرى طلبات قسمه
 	mux.Handle("GET /api/requests", auth(http.HandlerFunc(handlers.GetRequests)))
 	mux.Handle("GET /api/requests/{id}", auth(http.HandlerFunc(handlers.GetRequest)))
+	mux.Handle("GET /api/requests/{id}/timeline", auth(http.HandlerFunc(handlers.GetRequestTimeline)))
 	// إنشاء: الجهات الطالبة (نواب/رئاسات/لجان/رؤساء الكتل/مدراء/مستشارين — كلها role='deputy')
 	mux.Handle("POST /api/requests", role("deputy")(http.HandlerFunc(handlers.CreateRequest)))
 	// تعديل بيانات الطلب: المدير فقط
