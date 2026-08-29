@@ -13,6 +13,7 @@ import {
   IconClock, IconCheck, IconPlus, IconUpload,
 } from './components/icons/Icons'
 import { formatDate, formatDateTime } from './lib/format'
+import DeadlineBadge from './components/ui/DeadlineBadge'
 import * as api from './api'
 
 export default function ResearcherPortal({ user, onLogout }) {
@@ -100,7 +101,7 @@ export default function ResearcherPortal({ user, onLogout }) {
                       </div>
                       <p className="font-semibold text-[var(--color-navy-900)] truncate">{t.request_title}</p>
                       <p className="text-xs text-[var(--color-navy-500)] mt-1">
-                        {t.deadline ? `الموعد: ${formatDate(t.deadline)}` : 'بدون موعد'}
+                        {t.deadline ? `الموعد: ${formatDate(t.deadline)}` : 'بدون موعد'} <DeadlineBadge deadline={t.deadline} status={t.status} />
                       </p>
                     </div>
                   </button>
@@ -144,7 +145,7 @@ function TasksTable({ rows, onOpen }) {
               <td className="font-mono text-xs" dir="ltr">{t.id}</td>
               <td className="font-semibold max-w-md truncate">{t.request_title}</td>
               <td className="text-xs">{formatDate(t.date_assigned)}</td>
-              <td className="text-xs">{formatDate(t.deadline)}</td>
+              <td className="text-xs"><div className="flex items-center gap-2">{formatDate(t.deadline)}<DeadlineBadge deadline={t.deadline} status={t.status} /></div></td>
               <td><StatusBadge status={t.status} /></td>
               <td><button className="btn-ghost btn-sm">عرض</button></td>
             </tr>

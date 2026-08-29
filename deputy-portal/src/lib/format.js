@@ -146,3 +146,21 @@ export const STATUS_LABELS = {
   received: 'وصل الرد',
   no_response: 'بدون رد',
 }
+
+// الحالات التي لم تعد نشطة (لا معنى للتأخّر فيها)
+const CLOSED_STATUSES = ['delivered', 'completed', 'returned_exists', 'rejected', 'withdrawn']
+
+/**
+ * حالة المهلة: متأخّر / قريب / ضمن الوقت — مع عدد الأيام.
+ * يرجع null إن لا مهلة أو الطلب مغلق.
+ * @returns {{ state: 'overdue'|'soon'|'ok', days: number, label: string } | null}
+ */
+export function deadlineInfo(deadline, status) {
+  if (!deadline || CLOSED_STATUSES.includes(status)) return null
+  const d = new Date(deadline)
+  if (isNaN(d)) return null
+  const days = Math.ceil((d.getTime() - Date.now()) / 86400000)
+  if (days < 0) return { state: 'overdue', days: -days, label: `متأخّر ${-days} يوم` }
+  if (days <= 3) return { state: 'soon', days, label: days === 0 ? 'ينتهي اليوم' : `باقٍ ${days} يوم` }
+  return { state: 'ok', days, label: `باقٍ ${days} يوم` }
+}

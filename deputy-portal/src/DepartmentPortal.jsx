@@ -14,6 +14,7 @@ import {
   IconDocument, IconClock, IconCheck, IconPlus, IconSearch,
 } from './components/icons/Icons'
 import { formatDate, SERVICE_TYPES, CLASSIFICATIONS } from './lib/format'
+import DeadlineBadge from './components/ui/DeadlineBadge'
 import * as api from './api'
 
 export default function DepartmentPortal({ user, onLogout }) {
@@ -275,7 +276,7 @@ function ResearchTasksTable({ rows, onOpen }) {
                 <td className="font-mono text-xs whitespace-nowrap" dir="ltr">{t.id}</td>
                 <td className="text-sm">{t.researcher_name}</td>
                 <td className="text-xs whitespace-nowrap">{formatDate(t.date_assigned)}</td>
-                <td className="text-xs whitespace-nowrap">{formatDate(t.deadline)}</td>
+                <td className="text-xs whitespace-nowrap"><div className="flex items-center gap-2">{formatDate(t.deadline)}<DeadlineBadge deadline={t.deadline} status={t.status} /></div></td>
                 <td className="text-xs whitespace-nowrap">{t.completion_days ? `${t.completion_days} يوم` : '—'}</td>
                 <td><StatusBadge status={t.status} /></td>
                 <td><button className="btn-ghost btn-sm">عرض</button></td>
