@@ -1066,3 +1066,91 @@ func UpdateArchiveConsent(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم تسجيل قرارك بشأن الأرشفة"})
 }
+
+// PUT /api/research-tasks/{id}/retract - تراجع الباحث عن التسليم.
+// مسموح ما دام رئيس القسم لم يتصرّف بعد (الطلب في pending_dept_review)،
+// فيعود البحث «قيد الإعداد» ليعدّله الباحث ثم يعيد تسليمه. هذا يضمن نافذة
+// تراجع لا تقلّ عن يوم عملياً (حتى يبدأ رئيس القسم مراجعته).
+func RetractSubmission(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	userID := getUserID(r)
+
+	// الملكية: الباحث يتراجع عن مهمته فقط
+	var researcherID int
+	var taskStatus, requestID string
+	if err := db.DB.QueryRow(
+		"SELECT researcher_id, status, request_id FROM research_tasks WHERE id = ?", id,
+	).Scan(&researcherID, &taskStatus, &requestID); err != nil {
+		writeJSON(w, http.StatusNotFound, models.APIResponse{Success: false, Message: "المهمة غير موجودة"})
+		return
+	}
+	if researcherID != userID {
+		writeJSON(w, http.StatusForbidden, models.APIResponse{Success: false, Message: "غير مصرح بالتراجع عن هذه المهمة"})
+		return
+	}
+	if taskStatus != "submitted" {
+		writeJSON(w, http.StatusConflict, models.APIResponse{Success: false, Message: "لا يمكن التراجع إلا عن مهمة مُسلَّمة للتوّ"})
+		return
+	}
+
+	var userName string
+	logErr("RetractSubmission userName", db.DB.QueryRow("SELECT name FROM users WHERE id = ?", userID).Scan(&userName))
+
+	txErr := withTx(func(tx *sql.Tx) error {
+		now := time.Now()
+		// الطلب يجب أن يكون ما زال بانتظار مراجعة رئيس القسم — أي لم يتصرّف بعد.
+		// الحارس داخل الـUPDATE يجعل العملية آمنة أمام التزامن.
+		res, err := tx.Exec(
+			"UPDATE requests SET status = 'in_progress', updated_at = ? WHERE id = ? AND status = 'pending_dept_review'",
+			now, requestID)
+		if err != nil {
+			return fmt.Errorf("UPDATE requests: %w", err)
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return errStateConflict // رئيس القسم تصرّف بالفعل
+		}
+		// المهمة تعود «قيد الإعداد» (من submitted)
+		if _, err := tx.Exec(
+			"UPDATE research_tasks SET status = 'in_progress', submitted_date = NULL, updated_at = ? WHERE id = ? AND status = 'submitted'",
+			now, id); err != nil {
+			return fmt.Errorf("UPDATE research_task: %w", err)
+		}
+		// إشعار رؤساء قسم الباحث
+		headRows, _ := tx.Query(`
+			SELECT u.id FROM users u
+			JOIN research_tasks rt ON rt.researcher_id = ?
+			WHERE u.role = 'department_head' AND u.status = 'active'
+			  AND u.department_id = (SELECT department_id FROM users WHERE id = ?)
+		`, userID, userID)
+		if headRows != nil {
+			var heads []int
+			for headRows.Next() {
+				var h int
+				if headRows.Scan(&h) == nil {
+					heads = append(heads, h)
+				}
+			}
+			headRows.Close()
+			for _, h := range heads {
+				_ = createNotificationTx(tx, h, "تراجع الباحث عن التسليم",
+					fmt.Sprintf("تراجع الباحث عن تسليم بحث الطلب %s لإجراء تعديل قبل مراجعتكم", requestID),
+					"warning", strPtr("request"), &requestID)
+			}
+		}
+		return logActivityTx(tx, r, userID, userName, "retract_submission", strPtr("request"), &requestID, "تراجع الباحث عن التسليم لتعديل البحث")
+	})
+
+	if errors.Is(txErr, errStateConflict) {
+		writeJSON(w, http.StatusConflict, models.APIResponse{
+			Success: false, Message: "بدأ رئيس القسم مراجعة البحث — لم يعد التراجع ممكناً",
+		})
+		return
+	}
+	if txErr != nil {
+		log.Printf("RetractSubmission tx failed: %v", txErr)
+		writeJSON(w, http.StatusInternalServerError, models.APIResponse{Success: false, Message: "فشل التراجع عن التسليم"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, models.APIResponse{Success: true, Message: "تم التراجع — يمكنك تعديل البحث وإعادة تسليمه"})
+}

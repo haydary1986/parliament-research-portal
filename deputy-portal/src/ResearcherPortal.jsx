@@ -43,7 +43,8 @@ export default function ResearcherPortal({ user, onLogout }) {
   const myTasks = tasks
   // 'returned' ضمن النشطة: البحث المُرجَع من رئيس القسم أو المدقق يحتاج عملاً
   // من الباحث. كان يسقط من القائمة فيصله إشعار الإرجاع بلا سبيل للتعديل.
-  const activeTasks = myTasks.filter((t) => ['assigned', 'in_progress', 'returned'].includes(t.status))
+  // 'submitted' ضمن النشطة ليجد الباحث المهمة المُسلَّمة توّاً ويتراجع عنها إن لزم
+  const activeTasks = myTasks.filter((t) => ['assigned', 'in_progress', 'returned', 'submitted'].includes(t.status))
   const awaitingConsent = myTasks.filter((t) => ['completed'].includes(t.status) && !t.archive_consent)
   const completed = myTasks.filter((t) => t.status === 'completed')
 
@@ -216,6 +217,26 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
     finally { setBusy(false) }
   }
 
+  // التراجع عن التسليم — يعيد المهمة «قيد الإعداد» ليعدّلها الباحث
+  const retract = async () => {
+    if (!(await confirmAction({
+      title: 'التراجع عن التسليم',
+      message: 'سيعود البحث «قيد الإعداد» لتتمكّن من تعديله ثم إعادة تسليمه. متاح ما دام رئيس القسم لم يبدأ المراجعة.',
+    }))) return
+    setBusy(true)
+    try {
+      await api.retractSubmission(t.id)
+      toast.success('تم التراجع — يمكنك تعديل البحث وإعادة تسليمه')
+      await reloadInPlace()
+      // نحدّث حالة الطلب المعروضة أيضاً
+      if (t.request_id) {
+        const r = await api.getRequest(t.request_id).catch(() => null)
+        if (r?.success) setReqDetail(r.data)
+      }
+    } catch (e) { toast.error(e.message) }
+    finally { setBusy(false) }
+  }
+
   // تغييرات تُخرج المهمة من قائمة الباحث: نغلق النافذة
   const updateStatus = async (status) => {
     setBusy(true)
@@ -367,6 +388,17 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
                 رئيس القسم ← المدقق اللغوي ← المعاون ← التسليم للجهة الطالبة.
                 ستصلك إشعارات عند أي إرجاع للتعديل.
               </p>
+              {/* التراجع عن التسليم: متاح ما دام رئيس القسم لم يبدأ المراجعة */}
+              {t.status === 'submitted' && reqDetail?.status === 'pending_dept_review' && (
+                <div className="mt-3 pt-3 border-t border-[var(--color-navy-200)]">
+                  <p className="text-xs text-[var(--color-navy-600)] mb-2">
+                    ما زال بإمكانك التراجع لتعديل البحث — قبل أن يبدأ رئيس القسم مراجعته.
+                  </p>
+                  <button onClick={retract} disabled={busy} className="btn-outline btn-sm w-full">
+                    {busy ? 'جاري...' : '↩ التراجع عن التسليم'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

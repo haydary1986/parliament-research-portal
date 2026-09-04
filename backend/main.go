@@ -156,6 +156,7 @@ func main() {
 	mux.Handle("GET /api/research-tasks", role("researcher", "department_head", "manager", "assistant_manager", "admin")(http.HandlerFunc(handlers.GetResearchTasks)))
 	mux.Handle("GET /api/research-tasks/{id}", role("researcher", "department_head", "manager", "assistant_manager", "admin")(http.HandlerFunc(handlers.GetResearchTask)))
 	mux.Handle("PUT /api/research-tasks/{id}/status", role("researcher", "department_head")(http.HandlerFunc(handlers.UpdateResearchTaskStatus)))
+	mux.Handle("PUT /api/research-tasks/{id}/retract", role("researcher")(http.HandlerFunc(handlers.RetractSubmission)))
 	mux.Handle("POST /api/research-tasks/{id}/info-requests", role("researcher")(http.HandlerFunc(handlers.CreateInfoRequest)))
 	// تحديث رد الجهة على كتاب المعلومات
 	mux.Handle("PUT /api/information-requests/{id}/response", role("researcher")(http.HandlerFunc(handlers.UpdateInfoRequestResponse)))

@@ -155,6 +155,11 @@ export function updateResearchTaskStatus(id, status) {
   return request('PUT', `/research-tasks/${id}/status`, { status });
 }
 
+// تراجع الباحث عن التسليم (ما دام رئيس القسم لم يتصرّف)
+export function retractSubmission(id) {
+  return request('PUT', `/research-tasks/${id}/retract`);
+}
+
 export function createInfoRequest(taskId, data) {
   return request('POST', `/research-tasks/${taskId}/info-requests`, data);
 }
