@@ -491,6 +491,16 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
             </div>
           )}
 
+          {/* ملف البحث أولاً — يجب أن يراه رئيس القسم قبل أن يقرّر.
+              كان يظهر أسفل النافذة بعد أزرار القرار، فيعتمد دون مراجعته. */}
+          {(d.status === 'pending_dept_review' || d.status === 'pending_dept_send') && (
+            <ResearchFiles
+              files={d.files}
+              title="ملف البحث المسلَّم — راجعه قبل القرار"
+              emptyText={d.status === 'pending_dept_review' ? 'لم يُرفق ملف — راجع الباحث قبل الاعتماد' : undefined}
+            />
+          )}
+
           {/* مراجعة رئيس القسم للبحث المسلَّم (workflow جديد) */}
           {d.status === 'pending_dept_review' && (
             <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
@@ -543,12 +553,10 @@ function ConfirmRequestModal({ request, researchers, proofreaders, onClose, onCh
             <Field label="تاريخ الإحالة" value={formatDate(d.referral_date)} />
           </div>
 
-          {/* رئيس القسم يعتمد البحث — فيجب أن يراه أولاً */}
-          <ResearchFiles
-            files={d.files}
-            title="ملف البحث المسلَّم"
-            emptyText={d.status === 'pending_dept_review' ? 'لم يُرفق ملف — راجع الباحث قبل الاعتماد' : undefined}
-          />
+          {/* لبقية الحالات (قيد التنفيذ/التدقيق...): الملف للاطلاع أسفل التفاصيل */}
+          {d.status !== 'pending_dept_review' && d.status !== 'pending_dept_send' && (
+            <ResearchFiles files={d.files} title="ملف البحث" />
+          )}
 
           <Discussion
             entityType="request"

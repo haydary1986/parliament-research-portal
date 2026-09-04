@@ -221,6 +221,15 @@ function ReviewModal({ request, onClose, onChanged }) {
             <Field label="موافقة على النشر" value={d.can_share ? '✓ نعم' : '✗ لا'} />
           </div>
 
+          {/* الملف أولاً — المعاون يمنح الاعتماد النهائي فلا يصح أن يقرر بلا مستند */}
+          {d.status === 'pending_assistant' && (
+            <ResearchFiles
+              files={d.files}
+              title="ملف البحث للتدقيق النهائي — راجعه قبل القرار"
+              emptyText="لم يُرفق ملف بهذا البحث — لا تعتمده قبل التحقق"
+            />
+          )}
+
           {d.status === 'pending_assistant' && (
             <div className="card p-4 bg-[var(--color-gold-50)] border-[var(--color-gold-200)]">
               <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">التدقيق النهائي</h4>
@@ -287,12 +296,10 @@ function ReviewModal({ request, onClose, onChanged }) {
             </div>
           )}
 
-          {/* المعاون يمنح الاعتماد النهائي — فلا يصح أن يقرر بلا مستند */}
-          <ResearchFiles
-            files={d.files}
-            title="ملف البحث للتدقيق النهائي"
-            emptyText="لم يُرفق ملف بهذا البحث — لا تعتمده قبل التحقق"
-          />
+          {/* لغير حالة التدقيق: الملف للاطلاع أسفل التفاصيل */}
+          {d.status !== 'pending_assistant' && (
+            <ResearchFiles files={d.files} title="ملف البحث" />
+          )}
 
                     <div className="card p-4">
             <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">سجل القرارات</h4>
