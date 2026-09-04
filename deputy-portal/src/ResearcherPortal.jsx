@@ -12,7 +12,7 @@ import {
   IconDashboard, IconResearch, IconMail, IconArchive, IconDocument,
   IconClock, IconCheck, IconPlus, IconUpload,
 } from './components/icons/Icons'
-import { formatDate, formatDateTime } from './lib/format'
+import { formatDate, formatDateTime, PURPOSE_LABELS, CONFIDENTIALITY_LABELS, REQUESTER_TYPES } from './lib/format'
 import DeadlineBadge from './components/ui/DeadlineBadge'
 import * as api from './api'
 
@@ -158,6 +158,7 @@ function TasksTable({ rows, onOpen }) {
 
 function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
   const [detail, setDetail] = useState(null)
+  const [reqDetail, setReqDetail] = useState(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
@@ -171,16 +172,23 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
   const confirmAction = useConfirm()
 
   useEffect(() => {
-    if (!task) { setDetail(null); return }
+    if (!task) { setDetail(null); setReqDetail(null); return }
     setLoading(true)
     setShowInfo(false); setTarget(''); setSubject(''); setConsentNotes('')
     setLetterNumber(''); setLetterDate('')
+    setReqDetail(null)
     // علم cancelled: يمنع ردّ مهمةٍ سابقة من دهس تفاصيل مهمةٍ فُتحت بعدها
     let cancelled = false
     api.getResearchTask(task.id)
       .then((r) => { if (!cancelled && r.success) setDetail(r.data) })
       .catch(() => {})
       .finally(() => { if (!cancelled) setLoading(false) })
+    // تفاصيل الطلب: من الجهة الطالبة، العنوان الكامل، الوصف، اللجنة، الغرض
+    if (task.request_id) {
+      api.getRequest(task.request_id)
+        .then((r) => { if (!cancelled && r.success) setReqDetail(r.data) })
+        .catch(() => { /* التفاصيل غير حرِجة لعرض المهمة */ })
+    }
     return () => { cancelled = true }
   }, [task])
 
@@ -265,8 +273,36 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
       {loading ? <PageLoader /> : (
         <div className="space-y-5">
           <div className="flex items-start justify-between gap-3">
-            <h3 className="text-lg font-bold text-[var(--color-navy-900)]">{task.request_title}</h3>
+            <h3 className="text-lg font-bold text-[var(--color-navy-900)]">{reqDetail?.title || task.request_title}</h3>
             <StatusBadge status={t.status} />
+          </div>
+
+          {/* تفاصيل الطلب: من الجهة الطالبة، العنوان الكامل، الوصف، اللجنة، الغرض
+              — بدونها كان الباحث يُكلَّف بمهمة لا يعرف مصدرها ولا تفاصيلها */}
+          <div className="card p-4 border-r-4 border-r-[var(--color-gold-500)]">
+            <h4 className="font-bold text-sm mb-3 text-[var(--color-navy-900)]">بيانات الطلب</h4>
+            {reqDetail ? (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-3">
+                  <Field label="الجهة الطالبة" value={reqDetail.deputy_name} />
+                  <Field label="نوع الجهة" value={REQUESTER_TYPES[reqDetail.requester_type] || 'نائب'} />
+                  <Field label="اللجنة" value={reqDetail.committee} />
+                  <Field label="الغرض" value={PURPOSE_LABELS[reqDetail.purpose] || reqDetail.purpose || '—'} />
+                  <Field label="السرّية" value={CONFIDENTIALITY_LABELS[reqDetail.confidentiality] || 'عام'} />
+                  <Field label="رقم الطلب" value={reqDetail.id} />
+                  {reqDetail.confirmation?.service_type && <Field label="نوع الخدمة" value={reqDetail.confirmation.service_type} />}
+                  {reqDetail.confirmation?.classification && <Field label="التصنيف" value={reqDetail.confirmation.classification} />}
+                </div>
+                {reqDetail.description && (
+                  <div className="mt-3">
+                    <p className="text-[11px] uppercase tracking-wider text-[var(--color-navy-400)] font-semibold mb-1">تفاصيل البحث المطلوب</p>
+                    <p className="text-sm text-[var(--color-navy-800)] leading-relaxed whitespace-pre-wrap">{reqDetail.description}</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-[var(--color-navy-400)]">جارٍ تحميل تفاصيل الطلب…</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4 p-4 bg-[var(--color-surface-soft)] rounded-xl">
@@ -300,14 +336,17 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
               <div className="flex gap-3">
                 <button
                   onClick={async () => {
-                    const msg = t.file_path
-                      ? 'سيُسلَّم البحث لرئيس القسم للمراجعة.'
-                      : 'لم ترفع ملف البحث بعد. هل تريد التسليم بدون مرفق؟'
-                    if (!(await confirmAction({ title: 'تسليم البحث للمراجعة', message: msg, danger: !t.file_path }))) return
+                    // التسليم يتطلّب ملفاً — لا يُسلَّم بحث بلا مخرَج
+                    if (!t.file_path) {
+                      toast.error('يجب رفع ملف البحث قبل التسليم')
+                      return
+                    }
+                    if (!(await confirmAction({ title: 'تسليم البحث للمراجعة', message: 'سيُسلَّم البحث لرئيس القسم للمراجعة.' }))) return
                     updateStatus('submitted')
                   }}
-                  disabled={busy}
+                  disabled={busy || !t.file_path}
                   className="btn-success flex-1"
+                  title={!t.file_path ? 'ارفع ملف البحث أولاً' : undefined}
                 >
                   {t.status === 'returned' ? 'إعادة تسليم البحث' : 'تسليم البحث للمراجعة'}
                 </button>

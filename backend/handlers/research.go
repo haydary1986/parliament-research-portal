@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"noab-backend/db"
@@ -221,6 +222,20 @@ func UpdateResearchTaskStatus(w http.ResponseWriter, r *http.Request) {
 			Success: false, Message: "لا يمكن تنفيذ هذا الإجراء على المهمة في حالتها الحالية",
 		})
 		return
+	}
+
+	// التسليم يتطلّب رفع ملف البحث — لا يُسلَّم عمل بلا مخرَج.
+	// الفحص هنا وفي قاعدة البيانات (WHERE file_path...) دفاعاً مزدوجاً.
+	if input.Status == "submitted" {
+		var filePath sql.NullString
+		logErr("UpdateResearchTaskStatus file check",
+			db.DB.QueryRow("SELECT file_path FROM research_tasks WHERE id = ?", id).Scan(&filePath))
+		if !filePath.Valid || strings.TrimSpace(filePath.String) == "" {
+			writeJSON(w, http.StatusBadRequest, models.APIResponse{
+				Success: false, Message: "يجب رفع ملف البحث قبل التسليم",
+			})
+			return
+		}
 	}
 
 	var userName string
