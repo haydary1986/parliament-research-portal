@@ -524,17 +524,21 @@ function TaskDetailModal({ task, onClose, onChanged, onRefresh }) {
 
 function ResearchFileUpload({ task, onUploaded }) {
   const [uploading, setUploading] = useState(false)
+  const [progress, setProgress] = useState(0)
   const toast = useToast()
 
   const onFile = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 10 * 1024 * 1024) {
+      e.target.value = ''
       return toast.error('حجم الملف يتجاوز 10MB')
     }
     setUploading(true)
+    setProgress(0)
     try {
-      const up = await api.uploadFile(file)
+      // رفع بنسبة تقدّم — لا يُسمح بالتسليم حتى يكتمل الرفع (الزر مُعطَّل أثناءه)
+      const up = await api.uploadFileWithProgress(file, setProgress)
       if (up.success && up.data?.filename) {
         await api.attachResearchFile(task.id, up.data.filename)
         toast.success('تم رفع الملف بنجاح')
@@ -543,7 +547,7 @@ function ResearchFileUpload({ task, onUploaded }) {
         toast.error(up.message || 'فشل رفع الملف')
       }
     } catch (err) { toast.error(err.message || 'فشل رفع الملف') }
-    finally { setUploading(false); e.target.value = '' }
+    finally { setUploading(false); setProgress(0); e.target.value = '' }
   }
 
   return (
@@ -565,12 +569,30 @@ function ResearchFileUpload({ task, onUploaded }) {
             )}
           </div>
         </div>
-        <label className="btn-outline btn-sm cursor-pointer">
+        <label className={`btn-outline btn-sm cursor-pointer ${uploading ? 'opacity-60 pointer-events-none' : ''}`}>
           <IconUpload className="w-4 h-4" />
-          <span>{uploading ? 'جاري...' : (task.file_path ? 'استبدال' : 'رفع ملف')}</span>
+          <span>{uploading ? `جاري الرفع ${progress}%` : (task.file_path ? 'استبدال' : 'رفع ملف')}</span>
           <input type="file" accept=".pdf,.doc,.docx" onChange={onFile} disabled={uploading} className="sr-only" />
         </label>
       </div>
+
+      {/* شريط تقدّم الرفع — يمنع ضغط التسليم قبل اكتمال الرفع */}
+      {uploading && (
+        <div className="mt-3">
+          <div className="flex items-center justify-between text-[11px] font-semibold text-[var(--color-navy-700)] mb-1">
+            <span>جارٍ رفع الملف…</span>
+            <span className="tabular-nums">{progress}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-[var(--color-surface-soft)] overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-l from-[var(--color-gold-500)] to-[var(--color-gold-700)] transition-all duration-150"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <p className="text-[10px] text-[var(--color-navy-500)] mt-1">لا تُغلق النافذة ولا تُسلّم البحث حتى يكتمل الرفع.</p>
+        </div>
+      )}
+
       <p className="text-[10px] text-[var(--color-navy-500)] mt-2">PDF / DOC / DOCX (حد أقصى 10MB)</p>
     </div>
   )

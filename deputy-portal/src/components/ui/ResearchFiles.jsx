@@ -1,6 +1,11 @@
+import { useState } from 'react'
 import { formatDate } from '../../lib/format'
 import FileDownload from './FileDownload'
+import FilePreview from './FilePreview'
 import { IconDocument } from '../icons/Icons'
+
+// الأنواع القابلة للمعاينة المضمَّنة
+const PREVIEWABLE = /\.(pdf|docx)$/i
 
 /**
  * مرفقات البحث — تُعرض لكل من يحق له قراءة الطلب.
@@ -8,6 +13,7 @@ import { IconDocument } from '../icons/Icons'
  * بحوثاً لا تراها، والجهة الطالبة لا تستلم مخرَج طلبها إطلاقاً.
  */
 export default function ResearchFiles({ files, title = 'ملف البحث', emptyText }) {
+  const [preview, setPreview] = useState(null)
   if (!files || files.length === 0) {
     if (!emptyText) return null
     return (
@@ -41,13 +47,24 @@ export default function ResearchFiles({ files, title = 'ملف البحث', empt
                 {f.submitted_date && ` • سُلِّم ${formatDate(f.submitted_date)}`}
               </p>
             </div>
-            <FileDownload
-              filename={f.file_path}
-              className="btn-outline btn-sm flex-shrink-0"
-            />
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {PREVIEWABLE.test(f.file_path) && (
+                <button
+                  type="button"
+                  onClick={() => setPreview(f.file_path)}
+                  className="btn-primary btn-sm"
+                >
+                  معاينة
+                </button>
+              )}
+              <FileDownload filename={f.file_path} className="btn-outline btn-sm" />
+            </div>
           </li>
         ))}
       </ul>
+      {preview && (
+        <FilePreview filename={preview} title="معاينة ملف البحث" onClose={() => setPreview(null)} />
+      )}
     </div>
   )
 }

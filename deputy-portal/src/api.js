@@ -326,6 +326,44 @@ export function searchArchive(query) {
 }
 
 // ========== File Upload ==========
+// رفع ملف مع نسبة تقدّم عبر XHR (fetch لا يكشف تقدّم الرفع).
+// onProgress(percent) تُستدعى أثناء الرفع.
+export function uploadFileWithProgress(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/upload`);
+    xhr.withCredentials = true; // كوكي الجلسة (الإنتاج)
+    if (authToken) xhr.setRequestHeader('Authorization', `Bearer ${authToken}`); // الترويسة (التطوير)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let data = null;
+      try { data = JSON.parse(xhr.responseText); } catch { /* رد غير JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300 && data?.success) resolve(data);
+      else reject(new Error(data?.message || 'فشل رفع الملف'));
+    };
+    xhr.onerror = () => reject(new Error('انقطع الاتصال أثناء الرفع'));
+    xhr.onabort = () => reject(new Error('أُلغي الرفع'));
+    const fd = new FormData();
+    fd.append('file', file);
+    xhr.send(fd);
+  });
+}
+
+// جلب الملف كـ blob (مُصادَق) — للمعاينة المضمَّنة
+export async function fetchFileBlob(filename) {
+  const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {};
+  const res = await fetch(`${API_BASE}/files/${filename}`, { headers, credentials: 'include' });
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('انتهت الجلسة، سجّل الدخول من جديد');
+    if (res.status === 403) throw new Error('غير مصرح لك بمعاينة هذا الملف');
+    if (res.status === 404) throw new Error('الملف غير موجود على الخادم');
+    throw new Error('تعذّر فتح الملف');
+  }
+  return res.blob();
+}
+
 export async function uploadFile(file) {
   const formData = new FormData();
   formData.append('file', file);
